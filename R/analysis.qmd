@@ -1,0 +1,1308 @@
+---
+title: "Supplement: Grass Valley Model"
+date: today
+published-title: "COMPILED"
+format:
+  html: 
+    embed-resources: true
+    fig-align: center
+    fig-dpi: 300
+    fig-responsive: true
+    number-sections: true
+    number-depth: 3
+    toc: true
+    toc-depth: 3
+    smooth-scroll: true
+    theme: cosmo
+    highlight-style: a11y
+    code-links:
+      - text: kbvernon/grass-valley
+        icon: github
+        href: https://github.com/kbvernon/grass-valley
+execute: 
+  echo: true
+  warning: false
+  error: false
+---
+
+```{r}
+#| label: setup
+#| include: false
+options(dplyr.summarise.inform = FALSE)
+```
+
+## Overview
+
+**Goal**: model the distribution of PaleoIndian sites in Grass Valley, NV, under
+the constraint that we keep the methods as simple as possible.
+
+**Data**: (i) site data from Nevada SHPO along with additional survey and (ii)
+environmental data, mostly cost-distance estimates derived from a DEM and
+Campbell's hiking function.
+
+**Method**: Because PaleoIndian sites are extremely rare, we investigate two
+methods for handling small samples in species distribution models. The first is
+a comparative approach, similar to a hierarchical or joint SDM that does partial
+pooling, sharing information across "species." In this case, we use an
+interaction term for time period (`Archaic` and `PaleoIndian`) that approximates
+a hierarchical model.
+
+The second method is geostatistical, an attempt to squeeze additional
+information out of the spatial co-occurrence of the time periods. For sites
+$s \in \mathbb{R}^{2}$, we fit a species distribution model using Fixed Rank
+Kriging, formally
+
+$$ 
+Y(s) = \mu(X(s)) + \omega(s) + \xi(s)
+$$
+
+with $\mu(X(s))$ being the mean trend or deterministic response to spatially-
+referenced covariates $X$, $\omega(s)$ being the spatial process, and $\xi(s)$
+being a spatial noise term. Following Valavi *et al* (2021), we estimate the
+mean trend using down-sampled random forest, and the spatial process is
+approximated using a spatial basis function with $K$ spatial knots
+
+$$
+\omega(s) \equiv \sum_{k=1}^{K} \phi_{k}(s)\eta_{k}
+$$
+
+with $\phi_{k}(s)$ being the spatial basis function and $\eta_{k}$ a spatial
+weight derived from the data, which we estimate using the same random forest.
+
+## R Preamble
+
+```{r}
+#| label: libraries
+library(FRK)
+library(patchwork)
+library(ranger)
+library(sf)
+library(sfdep)
+library(terra)
+library(tidyterra)
+library(tidyverse)
+library(viridis)
+```
+
+Plotting defaults:
+
+```{r}
+#| label: plot-defaults
+#| code-fold: true
+theme_set(theme_bw())
+
+graph_gray <- "gray60"
+
+theme_update(
+  axis.text = element_text(color = graph_gray, size = rel(0.7)),
+  axis.ticks = element_line(color = graph_gray),
+  axis.title = element_text(color = graph_gray, size = rel(0.9)),
+  legend.background = element_blank(),
+  legend.box = element_blank(),
+  legend.spacing.x = grid::unit(0.005, "npc"),
+  legend.text = element_text(color = graph_gray, size = rel(0.9)),
+  panel.grid = element_blank(),
+  plot.subtitle = element_text(size = rel(1), margin = margin(b = 2)),
+  plot.title = element_text(size = rel(1), margin = margin(b = 4)),
+  strip.background = element_blank(),
+  strip.text = element_text(hjust = 0, size = rel(0.9), margin = margin(b = 4))
+)
+
+gvcols <- function(...) {
+  colors <- c(
+    "drab" = "#262A10",
+    "pink" = "#B287A3",
+    "purple" = "#5D2A42",
+    "orange" = "#FF9F1C",
+    "yellow" = "#FFD046",
+    "dark-drab" = "#161A00",
+    "dark-pink" = "#5E3E54",
+    "dark-purple" = "#400B27",
+    "dark-orange" = "#7D4B02",
+    "dark-yellow" = "#7C6200",
+    "light-drab" = "#8A8D7C",
+    "light-pink" = "#E7BCD7",
+    "light-purple" = "#B98A9D",
+    "light-orange" = "#FFD0B1",
+    "light-yellow" = "#FFE7BB"
+  )
+
+  x <- unlist(list(...))
+  unname(colors[x])
+}
+
+# mapping colors to legend labels is unnecessarily complicated...
+GuideColorLegend <- ggproto(
+  "GuideColorLegend",
+  GuideLegend,
+  build_labels = function(key, elements, params) {
+    n_labels <- length(key$.label)
+    if (n_labels < 1) {
+      out <- rep(list(zeroGrob()), nrow(key))
+      return(out)
+    }
+
+    colour <- key$colour %||% key$fill
+
+    # Extract alpha from the key (which includes override.aes modifications)
+    alpha <- key$alpha %||% rep(1, length(colour))
+
+    # Apply alpha to the colour
+    colour <- alpha(colour, alpha)
+
+    lapply(
+      seq_along(key$.label),
+      function(i) {
+        element_grob(
+          elements$text,
+          label = key$.label[i],
+          colour = colour[i],
+          margin_x = TRUE,
+          margin_y = TRUE
+        )
+      }
+    )
+  }
+)
+
+guide_colorlegend <- function(...) {
+  new_guide(
+    ...,
+    name = "ColorLegend",
+    super = GuideColorLegend
+  )
+}
+```
+
+Some constants we use throughout.
+
+```{r}
+#| label: constants
+# rng seed
+# United Starship Enterprise NCC-1701 🖖
+SEED <- 1701
+
+# random forest
+N_TREES <- 1000
+N_THREADS <- 24
+
+# buffer for aoi and map extents
+BUFFER <- 3500 # meters
+
+# partial dependence constants
+N_GRID <- 100
+```
+
+There's a lot of sampling in this analysis, so we set an RNG seed:
+
+```{r}
+#| label: seed
+set.seed(SEED)
+```
+
+## Data
+
+Dependent variable:
+
+-   `presence` in {0, 1}, 1 if an archaeological site has been recorded at a
+    location, 0 otherwise. This is presence-only data, so the 0s are a
+    **quadrature scheme**, background points for sampling environmental
+    conditions in the study area.
+
+Independent variables:
+
+-   `streams` cost-distance, or travel time to nearest stream
+-   `lake` cost-distance, or travel time to the estimated shoreline of a
+    Pleistocene lake
+-   `roads` cost-distance, or travel time to nearest road, which is included to
+    capture potential sampling bias
+
+Each cost-distance variable is measured in hours.
+
+**Note:** A limitation of the current approach is that we have to make $K$
+copies of the background data for the $K$ species being modeled. In this case,
+$K=2$, hence repeating `UNION ALL` for Archaic and PaleoIndian quadrature
+points.
+
+```{r}
+#| label: data
+gpkg <- "data/grass-valley.gpkg"
+
+aoi <- read_sf(gpkg, "aoi")
+
+sites <- read_sf(
+  gpkg,
+  query = paste(
+    "SELECT * FROM (",
+    "SELECT id, period, geom FROM sites",
+    "WHERE ST_Intersects(geom, (SELECT geom FROM aoi))",
+    "AND period IN ('Archaic', 'PaleoIndian')",
+    "UNION ALL",
+    "SELECT id, 'Archaic' AS period, geom FROM quadrature",
+    "UNION ALL",
+    "SELECT id, 'PaleoIndian' AS period, geom FROM quadrature",
+    ") AS s",
+    "LEFT JOIN ecology AS e ON s.id = e.id",
+    "ORDER BY pa DESC, period DESC"
+  )
+)
+
+dem <- rast("data/dem-100m.tif")
+
+costs <- rast(list.files("data", pattern = "^cd-", full.names = TRUE))
+names(costs) <- c("lake", "roads", "streams")
+```
+
+Here is the distribution of sites in Grass Valley.
+
+```{r}
+#| label: figure-overview-map
+#| code-fold: true
+lake <- read_sf(gpkg, "lake")
+roads <- read_sf(gpkg, "roads")
+
+bb8 <- aoi |>
+  st_buffer(BUFFER) |>
+  st_bbox()
+
+slope <- terrain(dem, "slope", unit = "radians")
+aspect <- terrain(dem, "aspect", unit = "radians")
+
+hill <- shade(slope, aspect, 30, 45)
+hill <- setValues(hill, scales::rescale(values(hill), to = c(1, 1000)))
+hill <- round(hill)
+coltab(hill) <- data.frame(value = 1:1000, col = hcl.colors(1000, "Grays"))
+hill <- colorize(hill, "rgb")
+
+jittered_sites <- sites |>
+  filter(period %in% c("Archaic", "PaleoIndian"), pa == 1) |>
+  select(id, period) |>
+  st_jitter(amount = 500)
+
+paleo_sites <- jittered_sites |>
+  filter(period == "PaleoIndian") |>
+  mutate(y = st_coordinates(geom)[, 2, drop = TRUE]) |>
+  arrange(desc(y))
+
+paleo_segments <- vector(mode = "list", length = nrow(paleo_sites))
+
+border <- aoi |>
+  st_buffer(3000) |>
+  st_transform(4326) |>
+  st_cast("LINESTRING")
+
+for (i in seq_along(paleo_segments)) {
+  g <- paleo_sites[i, ] |>
+    st_transform(4326) |>
+    st_nearest_points(border)
+
+  # chop off part of the border around this segment endpoint
+  # this will ensure non-overlapping labels
+  z <- g |>
+    st_cast("POINT") |>
+    st_sf(geom = _) |>
+    st_filter(border, .predicate = st_is_within_distance, dist = 1) |>
+    st_buffer(units::set_units(4500, "m"))
+
+  border <- st_difference(border, z)
+
+  paleo_segments[[i]] <- g |> st_transform(26911)
+
+  remove(i, g, z)
+}
+
+paleo_segments <- do.call(c, paleo_segments)
+
+xy <- paleo_segments |>
+  st_cast("POINT") |>
+  st_sf(geom = _) |>
+  st_join(aoi |> mutate(g = 1)) |>
+  filter(is.na(g)) |>
+  st_coordinates() |>
+  as_tibble() |>
+  rename_with(tolower)
+
+# if the nearest point on the border is to the left of the site,
+# then we want the label to be right-aligned, otherwise left-aligned
+paleo_labels <- paleo_sites |>
+  st_drop_geometry() |>
+  select(id) |>
+  bind_cols(xy, xo = c(st_coordinates(paleo_sites)[, "X"])) |>
+  relocate(x, y, id) |>
+  mutate(
+    hjust = ifelse(xo - x >= 0, 1, 0),
+    nudge_x = ifelse(hjust == 1, -500, 500)
+  )
+
+mx <- 5000
+
+plt <- ggplot() +
+  geom_spatraster_rgb(data = hill) +
+  geom_spatraster(data = dem, alpha = 0.5) +
+  scale_fill_hypso_c("utah_1") +
+  geom_sf(
+    data = lake,
+    fill = alpha("lightblue", 0.3),
+    color = "gray80",
+    linewidth = 0.2
+  ) +
+  geom_sf(data = roads, color = "gray55") +
+  geom_sf(
+    data = jittered_sites |> filter(period == "Archaic"),
+    color = gvcols("dark-pink"),
+    fill = alpha(gvcols("pink"), 0.75),
+    shape = 21,
+    size = 2.5
+  ) +
+  geom_sf(data = paleo_segments, linewidth = 0.3, color = "black") +
+  geom_sf(
+    data = jittered_sites |> filter(period == "PaleoIndian"),
+    color = "black",
+    fill = "white",
+    shape = 24,
+    size = 5.7,
+    stroke = 0.2
+  ) +
+  geom_sf(
+    data = jittered_sites |> filter(period == "PaleoIndian"),
+    color = gvcols("dark-orange"),
+    fill = alpha(gvcols("orange"), 0.75),
+    shape = 24,
+    size = 3
+  ) +
+  geom_text(
+    data = paleo_labels,
+    aes(x, y, label = id),
+    size = 10 / .pt,
+    hjust = paleo_labels[["hjust"]],
+    nudge_x = paleo_labels[["nudge_x"]]
+  ) +
+  annotate(
+    "segment",
+    x = 505000,
+    y = bb8[["ymin"]],
+    xend = 545000,
+    yend = bb8[["ymin"]],
+    color = "gray65"
+  ) +
+  annotate(
+    "segment",
+    x = bb8[["xmin"]] - mx,
+    y = 4382000,
+    xend = bb8[["xmin"]] - mx,
+    yend = 4442000,
+    color = "gray65"
+  ) +
+  scale_x_continuous(breaks = c(505000, 545000)) +
+  scale_y_continuous(breaks = c(4382000, 4442000)) +
+  coord_sf(
+    crs = 26911,
+    datum = 26911,
+    xlim = bb8[c("xmin", "xmax")] + c(-mx, BUFFER),
+    ylim = bb8[c("ymin", "ymax")],
+    expand = FALSE
+  ) +
+  theme(
+    axis.text.y = element_text(angle = 90, hjust = 0.5),
+    axis.title = element_blank(),
+    legend.position = "none",
+    panel.background = element_blank(),
+    panel.border = element_blank(),
+    plot.margin = ggplot2::margin()
+  )
+
+ggsave(
+  filename = "figures/overview-map.svg",
+  plot = plt,
+  width = 4,
+  height = 5
+)
+
+remove(
+  plt,
+  slope,
+  aspect,
+  mx,
+  jittered_sites,
+  list = ls(pattern = "paleo_")
+)
+```
+
+::: {#fig-overview-map style="width: 50%; margin: 0 auto;"}
+![](/figures/overview-map.svg){width="100%"}
+
+Overview map showing the sites of Archaic (pink circles) and PaleoIndian sites
+(orange triangles) in Grass Valley, NV. All points are randomly jittered to mask
+true locations.
+:::
+
+### Covariate distributions
+
+Here is the distribution of covariates across Archaic, PaleoIndian, and
+background locations.
+
+```{r}
+#| label: figure-covariates
+#| code-fold: true
+d <- sites |>
+  filter(!(period == "PaleoIndian" & pa == 0)) |>
+  st_drop_geometry() |>
+  mutate(
+    period = ifelse(pa == 0, "Background", period),
+    period = fct_relevel(factor(period), "Background")
+  ) |>
+  select(period, streams, lake, roads) |>
+  pivot_longer(
+    c(streams, lake, roads),
+    names_to = "variable",
+    values_to = "value"
+  )
+
+plt <- ggplot(d) +
+  geom_density(
+    aes(value, fill = period),
+    color = "transparent",
+    linewidth = 0
+  ) +
+  scale_fill_manual(
+    name = NULL,
+    values = alpha(gvcols("light-drab", "pink", "orange"), 0.5),
+    guide = guide_colorlegend(reverse = TRUE, override.aes = list(alpha = 1))
+  ) +
+  facet_wrap(
+    vars(variable),
+    ncol = 3,
+    scale = "free",
+    labeller = labeller(variable = \(.x) {
+      paste("To", str_to_title(.x))
+    })
+  ) +
+  labs(x = "Hours") +
+  coord_cartesian(expand = FALSE) +
+  theme(
+    axis.line.x.bottom = element_line(color = graph_gray),
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.title.y = element_blank(),
+    legend.justification = c("right", "top"),
+    legend.key.height = unit(0.2, "cm"),
+    legend.key.spacing.y = unit(0.2, "cm"),
+    legend.key.width = unit(0.3, "cm"),
+    legend.position = "inside",
+    legend.position.inside = c(1, 1),
+    panel.border = element_blank(),
+    panel.spacing = unit(12, "pt")
+  )
+
+ggsave(
+  filename = "figures/covariates.svg",
+  plot = plt,
+  width = 6.3,
+  height = 2.5
+)
+
+remove(d, plt)
+```
+
+::: {#fig-covariates style="width: 90%; margin: 0 auto;"}
+![](/figures/covariates.svg){width="100%"}
+
+Distribution of covariates in parameter space for Archaic, PaleoIndian, and
+background sites.
+:::
+
+### Spatial Basis Functions
+
+To account for spatial interaction, we use the Matérn32 radial basis function
+
+$$ 
+\phi_{k}(s) = (1 + \sqrt{3}d_{sk}/\kappa) exp(-\sqrt{3}d_{sk}/\kappa)
+$$
+
+evaluated at spatial knots $k$, with $\kappa$ being the range of support for
+each function.
+
+```{r}
+#| label: spatial-basis-fns
+basis_function <- auto_basis(
+  data = as_Spatial(sites),
+  nres = 2,
+  type = "Matern32"
+)
+
+spatial_bases <- eval_basis(basis_function, as_Spatial(sites))
+
+# give each column a name with id and resolution
+R <- basis_function@df[["res"]]
+
+colnames(spatial_bases) <- sprintf(
+  "sbf_%03d_%s",
+  seq_len(length(R)),
+  R
+)
+
+# filter to include only non-zero bases
+j <- which(colSums(spatial_bases) > 0)
+spatial_bases <- as.matrix(spatial_bases[, j])
+
+remove(R, j)
+```
+
+This might look complicated, but the procedure for evaluating $\phi$ over $K$ is
+surprisingly simple. First, let us note that $X(s)$ is, in effect, our design
+matrix with dimensions $n$ x $m$, for $n$ observations and $m$ covariates. The
+spatial basis function $\phi_{k}(s)$, when evaluated over the $K$ knots,
+produces an $n$ x $K$ matrix. The advantage of this approach is that a full
+covariance matrix across all sites would be $n$ x $n$, but with the spatial
+basis, we can approximate that covariance structure with a $n$ x $K$ matrix
+where $K << n$. Equally important, the resulting matrix can simply be
+concatenated with the design matrix $X(s)$ - `cbind()` in R-speak - thus,
+effectively treating the evaluated spatial basis as $K$ additional covariates.
+This means no additional optimization is required to fit the model. The default
+algorithm is sufficient.
+
+```{r, results='hide'}
+#| label: spatial-bases
+#| code-fold: true
+plt <- show_basis(basis_function) +
+  geom_sf(
+    data = aoi,
+    fill = alpha(gvcols("orange"), 0.3),
+    color = gvcols("orange"),
+    linewidth = 1
+  ) +
+  theme(
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    legend.position = "none",
+    panel.grid = element_blank(),
+    plot.margin = margin()
+  )
+
+bb8 <- st_bbox(sites)
+
+dx <- bb8[["xmax"]] - bb8[["xmin"]]
+dy <- bb8[["ymax"]] - bb8[["ymin"]]
+
+ggsave(
+  filename = "figures/spatial-bases.svg",
+  plot = plt,
+  width = 4,
+  height = 4 * (dy / dx)
+)
+
+remove(plt, bb8, dx, dy)
+```
+
+::: {#fig-spatial-bases style="width: 50%; margin: 0 auto;"}
+![](/figures/spatial-bases.svg){width="100%"}
+
+Range of support and knot (or center) of each Matérn32 radial basis function.
+:::
+
+### Collect data
+
+Now we collect the explanatory and spatial basis features into a separate table.
+
+```{r}
+#| label: training-data
+training_data <- sites |>
+  st_drop_geometry() |>
+  select(id, pa, period, streams, roads, lake) |>
+  mutate(
+    pa = factor(pa),
+    period = factor(period)
+  ) |>
+  bind_cols(spatial_bases)
+
+remove(spatial_bases)
+```
+
+### Colinearity check
+
+And a quick test to make sure they are not correlated.
+
+```{r}
+#| label: collinearity
+training_data |>
+  select(lake, roads, streams) |>
+  cor() |>
+  round(3)
+```
+
+## Analysis
+
+To account for class-imbalance in the presence and background sites, we use a
+down-sampled random forest as recommended Valavi *et al* (2021). This involves
+limiting the training data for each tree in the forest to an equal number of
+presence and background sites. The large number of trees, in this case N=1000,
+ensures proper sampling of the background environment without biasing the
+ensemble toward those background sites.
+
+### Down-sampling utilities
+
+We want to ensure that there are an equal number of PaleoIndian, Arhcaic, and
+background sites in every tree of the random forest.
+
+```{r}
+#| label: down-sampling-funs
+case_weights <- function(x) {
+  classes <- paste(
+    x[["period"]],
+    x[["pa"]],
+    sep = "-"
+  )
+  tbl <- table(classes)
+  w <- tbl["PaleoIndian-1"] / tbl[classes]
+  w <- unname(w)
+  i <- which(classes == "PaleoIndian-1")
+  w[i] <- 1
+  w
+}
+
+sample_fraction <- function(x) {
+  classes <- paste(
+    x[["period"]],
+    x[["pa"]],
+    sep = "-"
+  )
+  k <- length(unique(classes))
+  (k * sum(classes == "PaleoIndian-1")) / nrow(x)
+}
+```
+
+This is roughly equivalent to
+
+```{r}
+#| label: down-sample-example
+set.seed(SEED)
+
+local({
+  classes <- paste(
+    training_data[["period"]],
+    training_data[["pa"]],
+    sep = "-"
+  )
+
+  class_sample <- sample(
+    classes,
+    size = sample_fraction(training_data) * nrow(training_data),
+    replace = TRUE,
+    prob = case_weights(training_data)
+  )
+
+  table(class_sample)
+})
+```
+
+### Residual spatial autocorrelation
+
+We want to test for spatial autocorrelation in the residuals, so we first fit
+the full model and then check its residuals.
+
+```{r}
+#| label: random-forest
+rf_base <- ranger(
+  pa ~ lake + roads + streams + period,
+  data = training_data,
+  num.trees = N_TREES,
+  probability = TRUE,
+  case.weights = case_weights(training_data),
+  sample.fraction = sample_fraction(training_data),
+  num.threads = N_THREADS,
+  seed = SEED
+)
+```
+
+Check residuals
+
+```{r}
+#| label: morans-i-test
+moran_test <- function(.geometry, .residuals) {
+  suppressWarnings({
+    neighbors <- st_dist_band(.geometry, lower = 0)
+
+    spatial_weights <- st_kernel_weights(
+      nb = include_self(neighbors),
+      geometry = .geometry,
+      kernel = "gaussian"
+    )
+
+    global_moran_perm(
+      .residuals,
+      nb = neighbors,
+      wt = spatial_weights
+    )
+  })
+}
+
+observed <- with(training_data, as.numeric(levels(pa))[pa])
+
+estimate <- predict(
+  rf_base,
+  data = training_data,
+  type = "response",
+  num.threads = N_THREADS,
+  verbose = FALSE
+)[["predictions"]][, "1"]
+
+moran_test(
+  st_geometry(sites),
+  .residuals = observed - estimate
+)
+```
+
+### Leave-one-out Cross Validation (LOOCV)
+
+The AUC is a common metric used for evaluating the predictive power of SDMs. For
+extremely small samples, however, the AUC is ill-advised, especially for LOO-CV
+test sets, so we calculate instead the average difference between the
+probabilities assigned to the PaleoIndian sites and the background points in the
+test set. For a single PaleoIndian site compared to $N$ background points, the
+formula is
+
+$$\Delta P = \frac{1}{N}\sum^{N}_{i=1} P(Y=1) - P(Y_{i}=0) $$
+
+The size of $P(Y=1)$ in this case is analogous to the sensitivity of the model,
+it's ability to say where sites are located ("true positives" to use the
+technical jargon), and $P(Y=1) - P(Y=0)$ is analogous to the specificity of the
+model, it's ability to say where sites are *not* located (or "true negatives").
+Estimating this for each PaleoIndian sites requires looping through the data,
+training a model on all PaleoIndian sites except a focal site (the leave-one-out
+site), then predicting the probability of occurrence on the focal site ($P(Y =
+1)$) and all background sites ($P(Y_{i}=0)$). To simplify the for-loop, we
+define a helper function for fitting a model to training data and evaluating it
+against test data.
+
+::: callout-note
+Because we are modeling presence-only data, the expressions `P(Y=1)` and 
+`P(Y=0)` are more accurately interpreted as *relative likelihoods* rather than
+strict probabilities.
+:::
+
+```{r}
+#| label: evaluate-fn
+fit <- function(.formula, .train) {
+  ranger(
+    as.formula(.formula),
+    data = .train,
+    num.trees = N_TREES,
+    probability = TRUE,
+    case.weights = case_weights(.train),
+    sample.fraction = sample_fraction(.train),
+    num.threads = N_THREADS,
+    seed = SEED
+  )
+}
+
+estimate <- function(.model, .data) {
+  yhat <- predict(
+    .model,
+    data = .data,
+    type = "response",
+    num.threads = N_THREADS,
+    verbose = FALSE
+  )
+
+  yhat[["predictions"]][, "1"]
+}
+
+evaluate <- function(.formula, .train, .test) {
+  rf <- fit(.formula, .train)
+  y_hat <- estimate(rf, .test)
+
+  data.frame(
+    presence = y_hat[1],
+    absence = I(list(y_hat[-1]))
+  )
+}
+```
+
+Here we evaluate the LOO-CV metric for four models:
+
+1.  Base: cost-distance
+2.  Spatial: Base + spatial basis functions
+3.  Comparative: Base + period
+4.  Full: Base + spatial basis functions + period
+
+Now we specify our models
+
+```{r}
+#| label: formulas
+sbf_variables <- paste(
+  grep("^sbf_", names(training_data), value = TRUE),
+  collapse = " + "
+)
+
+formulas <- list(
+  Base = "pa ~ streams + lake + roads",
+  Spatial = paste0("pa ~ streams + lake + roads + ", sbf_variables),
+  Comparative = "pa ~ streams + lake + roads + period",
+  Full = paste0("pa ~ streams + lake + roads + period + ", sbf_variables)
+)
+
+remove(sbf_variables)
+```
+
+And evaluate them
+
+```{r}
+#| label: loocv
+ids <- with(training_data, id[pa == 1 & period == "PaleoIndian"])
+
+model_evals <- vector(mode = "list", length = length(ids))
+names(model_evals) <- ids
+
+for (id in ids) {
+  test <- bind_rows(
+    training_data |> filter(id == {{ id }}),
+    training_data |> filter(pa == 0, period == "PaleoIndian")
+  )
+
+  train <- training_data |> filter(id != {{ id }})
+
+  i <- with(train, which(period == "PaleoIndian"))
+
+  all_tests <- rbind(
+    evaluate(formulas[["Base"]], train[i, ], test),
+    evaluate(formulas[["Spatial"]], train[i, ], test),
+    evaluate(formulas[["Comparative"]], train, test),
+    evaluate(formulas[["Full"]], train, test)
+  )
+
+  all_tests[["model"]] <- names(formulas)
+  all_tests[["id"]] <- id
+
+  model_evals[[id]] <- all_tests[c("id", "model", "presence", "absence")]
+}
+
+model_evals <- do.call(rbind, model_evals)
+rownames(model_evals) <- NULL
+
+remove(id, ids, train, test, all_tests)
+```
+
+## Results
+
+To help interpret the results of the analysis, we provide all of the following:
+
+1.  LOOCV distributions across sites and models
+2.  Partial Dependence Profiles (PDP)
+3.  Spatial predictions
+
+These are evaluated for each of the four models detailed above.
+
+### Leave-one-out Cross Validation
+
+We evaluate the ability of each model to discriminate presence from background
+locations as described above.
+
+```{r}
+#| label: figure-loocv
+#| code-fold: true
+dp <- model_evals |>
+  unnest(absence) |>
+  mutate(
+    dp = presence - absence,
+    id = gsub("26LA", "", id),
+    model = fct_relevel(factor(model), "Full", "Comparative", "Spatial")
+  ) |>
+  group_by(id, model) |>
+  summarize(dp = mean(dp), n = length(absence)) |>
+  ungroup() |>
+  mutate(id = fct_reorder(factor(id), dp, max))
+
+segments <- dp |>
+  group_by(id) |>
+  summarize(x = min(dp), xend = max(dp)) |>
+  ungroup()
+
+plt1 <- ggplot() +
+  geom_segment(
+    data = segments,
+    aes(x, id, xend = xend, yend = id),
+    color = graph_gray,
+    linewidth = 0.3
+  ) +
+  geom_point(
+    data = dp,
+    aes(dp, id, color = model),
+    size = 2
+  ) +
+  scale_color_manual(
+    values = gvcols("light-drab", "pink", "orange", "yellow"),
+    guide = "none"
+  ) +
+  labs(x = "P(Y=1) - P(Y=0)", title = "A. Site Distributions") +
+  theme(axis.title.y = element_blank())
+
+labels <- dp |>
+  group_by(model) |>
+  summarize(x = quantile(dp, probs = 0.75)) |>
+  ungroup()
+
+plt2 <- ggplot() +
+  geom_boxplot(
+    data = dp,
+    aes(dp, model, fill = model),
+    linewidth = 0.3
+  ) +
+  geom_point(
+    data = dp,
+    aes(dp, model),
+    size = 2,
+    shape = 21,
+    color = "black",
+    fill = "white",
+    stroke = 0.2
+  ) +
+  geom_text(
+    data = labels,
+    aes(x, model, label = model, color = model),
+    nudge_x = 0.01,
+    nudge_y = 0.2,
+    hjust = 0,
+    vjust = 0,
+    size = 12 / .pt
+  ) +
+  scale_fill_manual(
+    values = gvcols("light-drab", "pink", "orange", "yellow")
+  ) +
+  scale_color_manual(
+    values = gvcols("drab", "dark-pink", "dark-orange", "dark-yellow")
+  ) +
+  labs(x = "P(Y=1) - P(Y=0)", title = "B. Model Distributions") +
+  theme(
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank(),
+    axis.title.y = element_blank(),
+    legend.position = "none"
+  )
+
+plt <- plt1 + plt2 + plot_layout(axis_titles = "collect")
+
+ggsave(
+  filename = "figures/loocv-results.svg",
+  plot = plt,
+  width = 7,
+  height = 4
+)
+
+remove(dp, segments, labels, plt, plt1, plt2)
+```
+
+::: {#fig-loocv-results style="width: 90%; margin: 0 auto;"}
+![](/figures/loocv-results.svg){width="100%"}
+
+Results of leave-one-out cross validation. (A) Distribution of differences
+across models for each PaleoIndian site. (B) Distribution of differences across
+PaleoIndian sites for each model.
+:::
+
+**Spatial sorting bias.** Note that the above LOO-CV currently ignores potential
+spatial sorting bias in the estimate, including the difference no matter the
+distance between the target PaleoIndian site and the background location.
+However, Tobler's Law implies that differences in probability at presence and
+background locations should increase with distance, all else being equal. Here
+we provide a visual check of this possibility, which also helps to interrogate
+the behavior of the models.
+
+```{r}
+#| label: figure-loocv-distance
+#| code-fold: true
+D <- st_distance(
+  sites |> filter(pa == 1, period == "PaleoIndian"),
+  sites |> filter(pa == 0, period == "PaleoIndian")
+)
+
+D <- D / 1000
+D <- units::drop_units(D)
+
+ids <- with(sites, id[pa == 1 & period == "PaleoIndian"])
+
+rownames(D) <- ids
+colnames(D) <- with(sites, id[pa == 0 & period == "PaleoIndian"])
+
+r <- seq(5, 65, by = 10)
+
+for (i in seq_len(nrow(model_evals))) {
+  id <- model_evals[["id"]][i]
+  dp <- c()
+
+  for (threshold in r) {
+    j <- which(c(D[id, ]) <= threshold)
+    j <- unname(j)
+
+    p_1 <- model_evals[i, "presence", drop = TRUE]
+    p_0 <- model_evals[i, "absence", drop = TRUE][[1]][j]
+
+    dp <- c(dp, mean(p_1 - p_0))
+  }
+
+  model_evals[["range"]][i] <- list(dp)
+}
+
+M <- as.data.frame(do.call(rbind, model_evals[["range"]]))
+colnames(M) <- r
+
+M <- cbind(model_evals[c("id", "model")], M)
+
+M <- M |>
+  pivot_longer(c(-id, -model), names_to = "distance", values_to = "value") |>
+  mutate(
+    distance = as.numeric(distance),
+    model = fct_relevel(factor(model), "Full", "Comparative", "Spatial")
+  )
+
+plt <- ggplot(M, aes(distance, value, group = model, color = model)) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 0.8) +
+  scale_color_manual(
+    name = "Model",
+    values = gvcols("light-drab", "pink", "orange", "yellow"),
+    guide = guide_colorlegend(reverse = TRUE)
+  ) +
+  facet_wrap(vars(id)) +
+  labs(x = "Distance [km]", y = "P(Y=1) - P(Y=0)") +
+  scale_x_continuous(breaks = seq(5, 65, by = 20)) +
+  theme(
+    legend.position = "top",
+    legend.margin = margin(),
+    legend.title = element_text(margin = margin(r = 6))
+  )
+
+ggsave(
+  plot = plt,
+  filename = "figures/loocv-distance.svg",
+  width = 6.5,
+  height = 7
+)
+
+remove(i, j, id, ids, dp, r, p_1, p_0, D, M, plt)
+```
+
+::: {#fig-loocv-distance style="width: 80%; margin: 0 auto;"}
+![](/figures/loocv-distance.svg){width="100%"}
+
+Results of leave-one-out cross validation compared to background points at
+different distances from each left out PaleoIndian site.
+:::
+
+### Partial Dependence Profile (PDP)
+
+```{r}
+#| label: partials
+pdp <- function(variable, model, data) {
+  # observations of focal variable
+  X <- data[[variable]]
+  X <- data.frame(x = seq(min(X), max(X), length = N_GRID))
+  names(X) <- variable
+
+  # expand grid
+  data[[variable]] <- NULL
+  new_data <- X |>
+    merge(data, all = TRUE) |>
+    subset(period == "PaleoIndian")
+
+  # estimate across expanded grid and average across each value of X
+  new_data[["yhat"]] <- estimate(model, new_data)
+  new_data <- new_data[c(variable, "yhat")]
+  names(new_data) <- c("x", "yhat")
+  new_data <- aggregate(
+    yhat ~ x,
+    data = new_data,
+    FUN = mean,
+    simplify = TRUE
+  )
+
+  # return
+  new_data[["variable"]] <- variable
+  new_data[c("variable", "x", "yhat")]
+}
+
+i <- which(training_data[["period"]] == "PaleoIndian")
+
+models <- Map(
+  fit,
+  .formula = formulas,
+  .train = list(
+    training_data[i, ],
+    training_data[i, ],
+    training_data,
+    training_data
+  ),
+  USE.NAMES = TRUE
+)
+
+partial_dependence <- Map(
+  pdp,
+  variable = rep(c("lake", "streams", "roads"), each = length(models)),
+  model = models,
+  MoreArgs = list(data = training_data),
+  USE.NAMES = FALSE
+)
+
+partial_dependence <- do.call(rbind, partial_dependence)
+
+partial_dependence[["model"]] <- rep(names(models), each = N_GRID)
+```
+
+```{r}
+#| label: figure-partials
+#| code-fold: true
+partial_dependence[["model"]] <- fct_relevel(
+  partial_dependence[["model"]],
+  "Full",
+  "Comparative",
+  "Spatial"
+)
+
+plt <- ggplot(partial_dependence, aes(x, yhat, color = model)) +
+  geom_line(linewidth = 0.8) +
+  scale_color_manual(
+    name = "Model",
+    values = gvcols("light-drab", "pink", "orange", "yellow"),
+    guide = guide_colorlegend(reverse = TRUE)
+  ) +
+  facet_wrap(
+    vars(variable),
+    ncol = 3,
+    scales = "free_x",
+    labeller = labeller(variable = \(.x) {
+      paste("To", str_to_title(.x))
+    })
+  ) +
+  labs(x = "Hours", y = "P(Y=1)") +
+  scale_y_continuous(breaks = c(0, 0.5, 1), limits = c(0, 1)) +
+  theme(
+    legend.position = "bottom",
+    legend.margin = margin(),
+    legend.title = element_text(margin = margin(r = 6))
+  )
+
+ggsave(
+  plot = plt,
+  filename = "figures/partials.svg",
+  width = 6.3,
+  height = 2.9
+)
+
+remove(plt)
+```
+
+::: {#fig-partials style="width: 90%; margin: 0 auto;"}
+![](/figures/partials.svg){width="100%"}
+
+Partial dependence plots. Response is technically the relative likelihood of
+occurrence of a PaleoIndian site, not a strict probability.
+:::
+
+### Predictions
+
+For spatial prediction, we need a raster for each covariate. We have that for
+the explanatory variables, but the spatial basis functions require that we apply
+Matérn32 to the distance from each grid cell to each knot, as we did with the
+presence and background locations.
+
+```{r}
+#| label: spatial-covariates
+# time period raster (the dummy variable)
+r_period <- setValues(dem, "PaleoIndian")
+names(r_period) <- "period"
+
+# function to build a raster for each spatial basis function
+sbf_to_raster <- function(x, r) {
+  xy <- xyFromCell(r, cells(r))
+  M <- eval_basis(x, xy)
+
+  # build a raster for each knot (or centroid for spatial basis function)
+  rr <- vector(mode = "list", length = ncol(M))
+  for (i in seq_len(ncol(M))) {
+    r[cells(r)] <- M[, i, drop = TRUE]
+    rr[[i]] <- r
+  }
+
+  # stack the list of rasters into a single raster with multiple layers
+  rast(rr)
+}
+
+r_spatial <- sbf_to_raster(basis_function, dem)
+names(r_spatial) <- grep("^sbf_", names(training_data), value = TRUE)
+
+# stack all covariate rasters and mask just to make sure we don't predict
+# outside of the project area
+r_covariates <- mask(c(r_period, costs, r_spatial), dem)
+
+remove(r_period, sbf_to_raster, r_spatial)
+```
+
+Now we feed these covariate rasters into our prediction function.
+
+```{r}
+#| label: predictions
+r_predictions <- lapply(
+  models,
+  \(rf) {
+    predict(r_covariates, rf, fun = estimate)
+  }
+)
+
+r_predictions <- rast(r_predictions)
+names(r_predictions) <- names(formulas)
+```
+
+```{r}
+#| label: figure-predictions
+#| code-fold: true
+r_predictions <- mask(r_predictions, dem)
+
+plt <- ggplot() +
+  geom_spatraster_rgb(data = hill) +
+  geom_spatraster(data = r_predictions, alpha = 0.5) +
+  scale_fill_distiller(
+    palette = "YlOrBr",
+    direction = 1,
+    na.value = "transparent"
+  ) +
+  facet_wrap(
+    vars(lyr),
+    nrow = 1
+  ) +
+  theme(
+    axis.text = element_blank(),
+    axis.ticks = element_blank(),
+    legend.position = "none",
+    plot.margin = margin()
+  )
+
+ggsave(
+  filename = "figures/predictions.svg",
+  plot = plt,
+  width = 7.5,
+  height = 3.2
+)
+```
+
+::: {#fig-predictions style="width: 100%; margin: 0 auto;"}
+![](/figures/predictions.svg){width="100%"}
+
+PaleoIndian response in geographic space.
+:::
+
+## Session Info
+
+```{r}
+#| label: session-info
+# save the session info as an object
+pkg_sesh <- sessioninfo::session_info(pkgs = "attached")
+
+# inject the quarto info
+pkg_sesh[["platform"]][["quarto"]] <- paste(
+  quarto::quarto_version(),
+  "@",
+  quarto::quarto_path()
+)
+
+# print it out
+pkg_sesh
+```
