@@ -1,4 +1,4 @@
-# grass_valley
+# grass-valley
 
 <!-- badges: start -->
 [![DOI](https://zenodo.org/badge/644078765.svg)](https://zenodo.org/doi/10.5281/zenodo.11661269)
