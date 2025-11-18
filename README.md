@@ -59,6 +59,10 @@ Assuming you had access to the data in `grass-valley.gpkg`, you could
 re-run all of the data preparation and analysis like this:
 
 ``` r
+# install R dependencies
+if (!require(renv)) install.packages("renv")
+renv::restore()
+
 library(quarto)
 
 # needs to be run in this order
