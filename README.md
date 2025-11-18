@@ -35,9 +35,7 @@ This repository contains data and code for the paper:
 
 📂 [\_extensions](/_extensions) has Quarto extension for compiling manuscript\
 📂 [data](/data) required for reproducing analysis and figures\
-  ⊢ 💾 [villages.csv](data/villages.csv)\
-  ⊢ 🌎 western-fremont.gpkg is a GeoPackage database with all necessary data\
-  ⊢ 📈 elevation-everything.csv is the coefficient table for the elevation
+  ⊢ 🌎 grass-valley.gpkg is a GeoPackage database with all necessary data\
 model\
   ⊢ 📈 western-fremont-model.Rds is the final model\
 📂 [figures](/figures) contains all figures included in the paper\
