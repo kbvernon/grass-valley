@@ -40,7 +40,7 @@ author:
       - ref: sci
       - ref: anthro
 abstract: |
-  PaleoIndian datasets are rife with statistical impediments to archaeological research, perhaps most notably the problem of small samples. Mixed effects models are known to alleviate small sample bias by sharing or pooling information across larger datasets, however they make strong distributional assumptions, require a large number of groups to be effective, and are often difficult to implement, particularly in the context of species distribution modeling. To avoid these issues, we propose a comparative machine learning approximation to the mixed effects model, specifically a classification Random Forest with interactions. As a test case, we apply Random Forest to the distribution of PaleoIndian sites in Grass Valley, Nevada, with an interaction term to account for differences in the spatial patterning of PaleoIndian and Archaic sites. Our implementation also uses down-sampling of background locations to account for class imbalance. The input feature set includes travel time estimates to resource rich areas and a spatial basis function to account for residual spatial autocorrelation. Versions of the model are built with increasing complexity and tested using leave-one-out cross validation. In addition to having decent predictive power, where each iteration of the model ends up failing turns out to be quite informative, pointing the way to additional research that promises to open up previously untapped data and resources for modeling the colonization of North America.
+  PaleoIndian datasets are rife with statistical impediments to archaeological research, perhaps most notably the problem of small samples. Mixed effects models are known to alleviate small sample bias by sharing or pooling information across larger datasets, however they make strong distributional assumptions, require a large number of groups to be effective, and are often difficult to implement, particularly in the context of species distribution modeling. To avoid these issues, we propose a comparative machine learning approximation to the mixed effects model, specifically a classification Random Forest with interactions. As a test case, we apply Random Forest to the distribution of PaleoIndian sites in Grass Valley, Nevada, with an interaction term to account for differences in the spatial patterning of PaleoIndian and Archaic sites. Our implementation also uses down-sampling of background locations to account for class imbalance. The input feature set includes travel time estimates to resource rich areas and a spatial basis function to account for residual spatial autocorrelation. Versions of the model are built with increasing complexity and tested using leave-one-out cross validation. In addition to having decent predictive power, where each iteration of the model ends up failing turns out to be quite informative, pointing the way to additional research that promises to open up previously untapped data and resources for modeling the initial settlement of North America.
 keywords:
   - Comparative Analysis
   - Random Forest
@@ -60,9 +60,9 @@ fontsize: 11.5pt
 # Introduction
 
 Research into PaleoIndian settlement in the Great Basin of Western North America
-has broad implications for the colonization of North America more generally
-[@beck1997; @grayson2011; @smith2020]. Unfortunately, the PaleoIndian record of
-the region is extremely patchy, incomplete, and subject to significant
+has broad implications for the initial settlement of North America more
+generally [@beck1997; @grayson2011; @smith2020]. Unfortunately, the PaleoIndian
+record of the region is extremely patchy, incomplete, and subject to significant
 taphonomic biases, with scant evidence available to adjudicate between competing
 hypotheses [@grayson2011; @jazwa2021]. To address these statistical challenges,
 we recommend a comparative approach that could, in principal, leverage all of
@@ -177,12 +177,13 @@ to small mammals, birds, and fish, and a wide variety of plants and seeds.
 However, disagreement surrounds the extent to which low ranked plant and animal
 resources actually contributed to PaleoIndian diets. @elston2014a provide a
 thorough summary of the current state of the evidence relevant to this question,
-which we will not review here. For our purposes, it is sufficient to note that
-it points to a general process of intensification on low ranked plant and animal
-resources from the PHT to the MH, which in turn suggests differences in the
-distributions of PaleoIndian and Archaic sites across the landscape, with
-PaleoIndian sites expected to occur at greater frequencies closer to basin
-bottoms where they would have encountered highly productive marsh habitats.
+which we will not review here [@brugger2020]. For our purposes, it is sufficient
+to note that it points to a general process of intensification on low ranked
+plant and animal resources from the PHT to the MH, which in turn suggests
+differences in the distributions of PaleoIndian and Archaic sites across the
+landscape, with PaleoIndian sites expected to occur at greater frequencies
+closer to basin bottoms where they would have encountered highly productive
+marsh habitats.
 
 # Materials and Methods
 
@@ -247,6 +248,7 @@ meaningful signal of the presence of archaeological sites, even with really
 large samples. To address this issue, we rely on topographic variation,
 estimating cost-distance to critical water resources, namely perennial streams
 and the hypothesized shoreline of the Pleistocene lake (both measured in hours).
+
 To calculate cost-distance, we use the R package terra [@hijmans2025], applying
 Campbell's hiking function [@campbell2019; @campbell2022] to slope estimates
 derived from a digital elevation model (DEM), which we acquired from the United
@@ -457,6 +459,15 @@ nearby analyses in Railroad Valley [@elston2014] and Long Valley [@jones1996;
 @huckleberry2001]. It also adds to the finding in Long Valley that streams
 feeding into wetlands were an important draw for PaleoIndian populations.
 
+In fact, we believe that the most productive marshes were probably at the inlets
+on the north and south sides of the Pleistocene lake, where most of the known
+sites tend to cluster. For instance, the Callahan Creek delta in the south of
+the valley was most likely the largest and best watered during the terminal
+Pleistocene, recieving water from both the Toiyabe range to the west and the
+Simpson Park range to the east. If we had a better way of estimating this, it
+would likely improve the performance of our models. Future research should focus
+on increasing the resolution of marsh habitat reconstructions.
+
 ## Model interpretation
 
 While the models have only modest predictive power, variation in the ability of
@@ -523,7 +534,7 @@ comparative model will be more appropriate.
 ## Implications for PaleoIndian research
 
 These findings and, in particular, the comparative, spatial methods used to
-arrive at them have important implications for the colonization of North
+arrive at them have important implications for the initial settlement of North
 America, especially for debates surrounding when and by what routes people
 settled the interior [@beck1997; @grayson2011; @smith2020]. In the Great Basin,
 this debate centers on the chronological relationship between distinct lithic
@@ -541,13 +552,13 @@ morphometric properties [@beck2019; @beck2007]. Still, they are Clovis-like in
 their manufacture and likely function, so they are thought to represent the
 introduction of Clovis people or Clovis technology (or something descended from
 those) into the Great Basin, probably from the Great Plains or Southwest, where
-classic Clovis-type points are more often found [@beck2019]. WST points are
-harder to pin down. While they are often found co-occurring with GBF points
-around Pleistocene marshes, their spatial distribution is much wider than that
-of GBF points [@basgall2000; @eerkens2007]. Recent evidence from sites like
-Paisley Caves [@jenkins2012] also suggests that WST points entered the Great
-Basin around the same time Clovis technology emerged on the Great Plains
-[@beck2019; @smith2020].
+classic Clovis-type points are more often found [@beck2019; @beck2024;
+@jones2024]. WST points are harder to pin down. While they are often found
+co-occurring with GBF points around Pleistocene marshes, their spatial
+distribution is much wider than that of GBF points [@basgall2000; @eerkens2007].
+Recent evidence from sites like Paisley Caves [@jenkins2012] also suggests that
+WST points entered the Great Basin around the same time Clovis technology
+emerged on the Great Plains [@beck2019; @smith2020].
 
 On the basis of this evidence, @beck2010 have argued that individuals
 manufacturing and using WST points in the Great Basin likely descended from
