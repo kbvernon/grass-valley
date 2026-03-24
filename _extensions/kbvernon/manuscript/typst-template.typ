@@ -12,8 +12,14 @@
   doc,
 ) = {
   set page(
-    paper: "us-letter", 
-    margin: (x: 1in, y: 1in)
+    paper: "us-letter",
+    margin: (x: 1in, y: 1in),
+    footer: context {
+      let page-num = counter(page).get().first()
+      if page-num > 1 {
+        align(center)[#(page-num - 1)]
+      }
+    }
   )
   set par(
     justify: false,
@@ -112,9 +118,6 @@
   // correspondence
   [*Correspondence:* #correspondence]
   pagebreak()
-
-  set page(numbering: "1")
-  counter(page).update(1)
 
   // main
   doc
