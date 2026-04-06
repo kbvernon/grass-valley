@@ -1,7 +1,7 @@
 # grass-valley
 
 <!-- badges: start -->
-[![DOI](https://zenodo.org/badge/644078765.svg)](https://zenodo.org/doi/10.5281/zenodo.11661269)
+[![DOI](https://zenodo.org/badge/644078765.svg)](https://zenodo.org/)
 [![License: CC BY 4.0](https://img.shields.io/badge/License-CC_BY_4.0-lightgrey.svg)](https://creativecommons.org/licenses/by/4.0/)
 [![Static Badge](https://img.shields.io/badge/Quarto-Paper-74AADB?style=social&logo=Quarto)](https://quarto.org)
 <!-- badges: end -->
@@ -17,7 +17,7 @@ This repository contains data and code for the paper:
 > David Zeanah
 > [![](https://orcid.org/sites/default/files/images/orcid_16x16.png)](https://orcid.org/0000-0002-1944-4555),
 > D. Craig Young
-> [![](https://orcid.org/sites/default/files/images/orcid_16x16.png)](https://orcid.org/0000-0002-0316-310X),
+> [![](https://orcid.org/sites/default/files/images/orcid_16x16.png)](https://orcid.org/0000-0003-1706-0352),
 > Robert G. Elston
 > [![](https://orcid.org/sites/default/files/images/orcid_16x16.png)](https://orcid.org/0000-0002-2213-2368),
 > Simon Brewer
@@ -35,11 +35,10 @@ This repository contains data and code for the paper:
 
 📂 [\_extensions](/_extensions) has Quarto extension for compiling manuscript\
 📂 [data](/data) required for reproducing analysis and figures\
-  ⊢ 🌎 grass-valley.gpkg is a GeoPackage database with all necessary data\
-model\
-  ⊢ 📈 western-fremont-model.Rds is the final model\
+  ⊢ 🌎 grass-valley.gpkg has all necessary data\
 📂 [figures](/figures) contains all figures included in the paper\
 📂 [manuscript](/manuscript) contains the pre-print\
+  ⊢ 📄 [bibliography.bib](/manuscript/bibliography.bib)\
   ⊢ 📄 [manuscript.qmd](/manuscript/manuscript.qmd)\
   ⊢ 📄 [manuscript.pdf](/manuscript/manuscript.pdf)\
 📂 [R](/R) code for preparing data and conducting analysis, including\
@@ -66,18 +65,7 @@ renv::restore()
 library(quarto)
 
 # needs to be run in this order
-file.path("R", "data-wrangling.R") |> source()
-file.path("R", "analysis.qmd") |> quarto_render()
-
-# if you have a hankerin' to compile the manuscript
-# you can do that like so:
-file.path("manuscript", "manuscript.qmd") |> quarto_render()
+source("R/data-wrangling.R")
+quarto_render("R/analysis.qmd")
+quarto_render("manuscript/manuscript.qmd")
 ```
-
-## License
-
-**Text and figures:** [CC-BY-4.0](http://creativecommons.org/licenses/by/4.0/)
-
-**Code:** [MIT](LICENSE.md)
-
-**Data:** not available.
