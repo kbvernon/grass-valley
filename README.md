@@ -1,7 +1,7 @@
 # grass-valley
 
 <!-- badges: start -->
-[![DOI](https://zenodo.org/badge/644078765.svg)](https://zenodo.org/)
+[![DOI](https://zenodo.org/badge/492549877.svg)](https://doi.org/10.5281/zenodo.19445861)
 [![License: CC BY 4.0](https://img.shields.io/badge/License-CC_BY_4.0-lightgrey.svg)](https://creativecommons.org/licenses/by/4.0/)
 [![Static Badge](https://img.shields.io/badge/Quarto-Paper-74AADB?style=social&logo=Quarto)](https://quarto.org)
 <!-- badges: end -->
