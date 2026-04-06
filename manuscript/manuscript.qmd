@@ -40,7 +40,7 @@ author:
       - ref: sci
       - ref: anthro
 abstract: |
-  PaleoIndian datasets are rife with statistical impediments to archaeological research, perhaps most notably the problem of small samples. Mixed effects models are known to alleviate small sample bias by sharing or pooling information across larger datasets, however they make strong distributional assumptions, require a large number of groups to be effective, and are often difficult to implement, particularly in the context of species distribution modeling. To avoid these issues, we propose a comparative machine learning approximation to the mixed effects model, specifically a classification Random Forest with interactions. As a test case, we apply Random Forest to the distribution of PaleoIndian sites in Grass Valley, Nevada, with an interaction term to account for differences in the spatial patterning of PaleoIndian and Archaic sites. Our implementation also uses down-sampling of background locations to account for class imbalance. The input feature set includes travel time estimates to resource rich areas and a spatial basis function to account for residual spatial autocorrelation. Versions of the model are built with increasing complexity and tested using leave-one-out cross validation. In addition to having decent predictive power, where each iteration of the model ends up failing turns out to be quite informative, pointing the way to additional research that promises to open up previously untapped data and resources for modeling the initial settlement of North America.
+  Paleoindian sites are exceedingly rare, which limits our ability to train predictive models capable of accurately identifying unknown site locations, or inferential models capable of accounting for the environmental factors that drove past settlement decisions. To overcome these limitations and advance our understanding of Paleoindian settlement, we propose a comparative machine learning approximation to mixed effects models, specifically a Random Forest classification with an interaction term to account for differences in the spatial patterning of PaleoIndian and Archaic sites and down-sampling of background locations to account for class imbalance. As a test case, we apply this framework to the distribution of PaleoIndian sites in Grass Valley, Nevada, a well-studied locale in the Central Great Basin. The input feature set includes travel time estimates to resource rich areas and a spatial basis function to account for residual spatial autocorrelation. Versions of the model are built with increasing complexity and tested using leave-one-out cross validation. Model results indicate that Paleoindian settlements focused on minimizing distance to pluvial lake habitats, especially at the intersection of waterways, while later Archaic settlements were more dispersed across diverse environments. In addition to having decent predictive power, results point to additional research that promises to open up previously untapped data and resources for modeling the initial settlement of North America.
 keywords:
   - Comparative Analysis
   - Random Forest
@@ -51,7 +51,7 @@ keywords:
 target_journal: "Journal of Archaeological Science"
 correspondence: k.vernon@sci.utah.edu (Blake Vernon)
 bibliography: bibliography.bib
-bibliographystyle: apa
+csl: apa
 format:
   manuscript-typst: default
 fontsize: 11.5pt
@@ -61,11 +61,11 @@ fontsize: 11.5pt
 
 Research into PaleoIndian settlement in the Great Basin of Western North America
 has broad implications for the initial settlement of North America more
-generally [@beck1997; @grayson2011; @smith2020]. Unfortunately, the PaleoIndian
-record of the region is extremely patchy, incomplete, and subject to significant
-taphonomic biases, with scant evidence available to adjudicate between competing
-hypotheses [@grayson2011; @jazwa2021]. To address these statistical challenges,
-we recommend a comparative approach that could, in principal, leverage all of
+generally [@beck1997; @grayson2011; @smith2020; @bradley2022]. Unfortunately,
+the PaleoIndian record of the region is extremely patchy and incomplete, leaving
+scant evidence available to adjudicate between competing hypotheses of early
+settlement [@grayson2011; @jazwa2021]. To address these statistical challenges,
+we recommend a comparative approach that could, in principle, leverage all of
 the archaeological sites within a study area to model the subset of them
 associated with PaleoIndian populations - or, for that matter, any
 archaeological population of interest. In effect, we propose to model
@@ -75,31 +75,32 @@ covariates.
 
 A mixed effects model is preferable for handling small sample sizes as it allows
 groups with very small samples - even singleton groups - to borrow strength from
-larger groups, a process known as partial-pooling (CITE). However, this
+larger groups, a process known as partial-pooling [@gelman2007]. However, this
 typically requires a large number of groups to estimate mean and variance in the
 parameters, which, unfortunately, is not available to us in this instance, and
 also requires strong assumptions about the underlying distributions, so we
 choose instead to implement an approximation to the mixed effects model using a
-well-known machine learning algorithm known as Random Forest [@baddeley2015;
-@fithian2013; @renner2015]. We also derive a simple, intuitive justification for
-the method from the Ideal Free Distribution (IFD) model from ecology
-[@fretwell1969; @winterhalder2010; @codding2015], with particular attention
-given to differences in subsistence strategy and their consequences for
-settlement. Together, these ideas build on the approach recommended by
-[@vernon2021].
+well-known machine learning algorithm known as Random Forest [@breiman2001]. We
+also derive a simple, intuitive justification for the method from the Ideal Free
+Distribution (IFD) model from ecology [@fretwell1969; @winterhalder2010;
+@codding2015; @weitzel2022], with particular attention given to differences in
+subsistence strategy and their consequences for settlement. Together, these
+ideas build on the approach recommended by [@vernon2021].
 
 As a case study, we model PaleoIndian and Archaic settlement reflected in the
-distribution of archaeological sites found in Grass Valley, Nevada. For
+distribution of archaeological sites found in Grass Valley, Nevada, an area that
+has been the focus of considerable archaeological attention and empirical
+investigation [@brugger2020; @clewlow1978; @elston2025; @wells2013]. For
 comparative purposes, we choose to focus on sites associated with Archaic
 hunter-gatherers as they provide an important contrast for PaleoIndian sites in
 terms of their settlement patterning and subsistence. Following [@elston2002;
 @elston2014], we expect PaleoIndian sites to occur at greater densities in lower
 elevation areas that would have been productive marsh habitats during the
 Pleistocene-Holocene Transition (PHT), from roughly 11,000 to 9,000 years BP.
-Owing to climate-induced reductions to those marsh habitats, Archaic sites
-should occur at slightly higher elevations along the slopes of ranges, where
-habitats would have been more productive during the Middle Holocene (MH), from
-roughly 7,000 to 4,500 years BP.
+Owing to climate-induced reductions to those marsh habitats [@brugger2020;
+@duke2014], Archaic sites should occur at slightly higher elevations along the
+slopes of ranges, where habitats would have been more productive during the
+Middle Holocene (MH), from roughly 7,000 to 4,500 years BP.
 
 # Background
 
@@ -107,20 +108,23 @@ roughly 7,000 to 4,500 years BP.
 
 The IFD model [@fretwell1969] is typically applied to situations in which
 individuals compete for a finite share of a habitat's limited resources, a
-situation otherwise known as scramble competition (CITE). The habitat's
-suitability will, thus, exhibit negative density dependence, declining as more
-individuals compete for its limited resources. If we assume that the choice of
-habitats is both *ideal* and *free*, meaning individuals have sufficient
-knowledge to accurately rank habitats according to their suitability (the ideal
-condition), and they can settle habitats without restriction or cost (the free
-condition), then individuals seeking to maximize their food intake (their
-habitat suitability) will distribute themselves across habitats so as to achieve
-an equilibrium in food intake per capita. That is, they will achieve an ideal
-free distribution.
+situation otherwise known as scramble competition [@nicholson1954; @parker2000].
+The habitat's suitability will, thus, exhibit negative density dependence,
+declining as more individuals compete for its limited resources. If we assume
+that the choice of habitats is both *ideal* and *free*, meaning individuals have
+sufficient knowledge to accurately rank habitats according to their suitability
+(the ideal condition), and they can settle habitats without restriction or cost
+(the free condition), then individuals seeking to maximize their food intake
+(their habitat suitability) will distribute themselves across habitats so as to
+achieve an equilibrium in food intake per capita. That is, they will achieve an
+ideal free distribution. Empirical evaluations with ethnographic and historic
+evidence suggest human settlement decisions follow an ideal free distribution
+across diverse subsistence strategies [@disma2011; @moritz2015; @yaworsky2018;
+@einarsson2015; @codding2013].
 
-While the IFD is a static model, behavioral ecologists will to evaluate changes
-to the equilibrium under different conditions, a mode of reasoning known in
-economics as comparative statics. More often than not, that involves
+While the IFD is a static model, behavioral ecologists will often evaluate
+changes to the equilibrium under different conditions, a mode of reasoning known
+in economics as comparative statics. More often than not, that involves
 consideration of climate induced changes to habitat suitability, with
 individuals expected to shuffle between habitats in response. Environmental
 changes also affect decisions related to subsistence, however, and those choices
@@ -175,15 +179,14 @@ semi-sedentary hunter-gatherers during the MH. Archaeologists generally agree
 that both populations had broad diets, including everything from large ungulates
 to small mammals, birds, and fish, and a wide variety of plants and seeds.
 However, disagreement surrounds the extent to which low ranked plant and animal
-resources actually contributed to PaleoIndian diets. @elston2014a provide a
+resources actually contributed to PaleoIndian diets. @elston2014 provide a
 thorough summary of the current state of the evidence relevant to this question,
-which we will not review here [@brugger2020]. For our purposes, it is sufficient
-to note that it points to a general process of intensification on low ranked
-plant and animal resources from the PHT to the MH, which in turn suggests
-differences in the distributions of PaleoIndian and Archaic sites across the
-landscape, with PaleoIndian sites expected to occur at greater frequencies
-closer to basin bottoms where they would have encountered highly productive
-marsh habitats.
+which we will not review here. For our purposes, it is sufficient to note that
+their summary points to a general process of intensification on low ranked plant
+and animal resources from the PHT to the MH, which in turn suggests differences
+in the distributions of PaleoIndian and Archaic sites across the landscape, with
+PaleoIndian sites expected to occur at greater frequencies closer to basin
+bottoms where they would have encountered highly productive marsh habitats.
 
 # Materials and Methods
 
@@ -210,7 +213,7 @@ kilometers, but given that the valley has a certain tilt from the northeast to
 the southwest, the total project area is closer to 2000 square kilometers. There
 are also four primary entry points into the valley, one coming up from Austin to
 the south, and the other three at the northern periphery, including one from
-{{SOME}} Valley to the west, one from Crescent Valley to the north, and one from
+Antelope Valley to the west, one from Crescent Valley to the north, and one from
 Pine Valley to the east, which suggests that most east-west inter-valley travel
 would have been concentrated at the northern end of the project area.
 
@@ -220,17 +223,17 @@ To identify Archaic and PaleoIndian sites in the project area, we draw on site
 records and cultural resource reports hosted by the Nevada Cultural Resource
 Information System (NVCRIS) with permission from the State Historic Preservation
 Office. We then supplement the resulting dataset with additional PaleoIndian and
-Archaic sites identified during NSF funded fieldwork from 2016 to 2018. This
-fieldwork was guided by a predictive model based on soil and geomorphological
-data. The model did not directly predict PaleoIndian site occurrences, but
-rather identified landforms dating to the Terminal Pleistocene and Early
-Holocene that would have been near wetland habitats. Field research involved
-systematic survey of targeted locations, followed by testing of selected sites.
-In total, four new PaleoIndian sites were identified. Two PaleoIndian sites are
-excluded from this analysis, however, as they occur at the extreme south end of
-the watershed and thus fall outside the project area. The resulting dataset
-contains 14 PaleoIndian sites and 123 Archaic sites, as shown in
-@fig-overview-map.
+Archaic sites identified during National Science Foundation funded fieldwork
+from 2016 to 2018. This fieldwork was guided by a predictive model based on soil
+and geomorphological data. The model did not directly predict PaleoIndian site
+occurrences, but rather identified landforms dating to the Terminal Pleistocene
+and Early Holocene that would have been near wetland habitats. Field research
+involved systematic survey of targeted locations, followed by testing of
+selected sites. In total, four new PaleoIndian sites were identified. Two
+PaleoIndian sites are excluded from this analysis, however, as they occur at the
+extreme south end of the watershed and thus fall outside the project area. The
+resulting dataset contains 14 PaleoIndian sites and 123 Archaic sites, as shown
+in @fig-overview-map.
 
 ## Environmental covariates
 
@@ -264,18 +267,19 @@ intensely surveyed than areas farther away from roads.
 To estimate the background distribution of these covariates, we use the R
 package sf [@pebesma2018] to generate a spatially uniform grid of 10,000 points,
 otherwise known as a quadrature scheme, and extract the values of covariates at
-those sample locations using tera. The distribution of these estimates in
+those sample locations using terra. The distribution of these estimates in
 parameter space is shown in @fig-covariates for PaleoIndian and Archaic presence
 locations and all background locations.
 
 ## Statistical model
 
 We define our target outcome $P(Y(s)=1 \,|\, X(s))$ to be the probability that a
-site is present at a location $s \in \mathbb{R}^{2}$ given covariates $X$
-observed at $s$. This probability is assumed to be some unknown function
-$f(X(s))$ of those spatially-resolved covariates. To estimate $f$, we use the
-classification Random Forest algorithm implemented in the R package ranger
-[@wright2017], in this case fitting 1000 individual trees to bootstrap
+site is present at a location $s \in \mathcal{D}$ given covariates $X$ observed
+at $s$, with $\mathcal{D} \subset \mathbb{R}^{2}$ being the spatial extent of
+our project area, Grass Valley. This probability is assumed to be some unknown
+function $f(X(s))$ of those spatially-resolved covariates. To estimate $f$, we
+use the classification Random Forest algorithm implemented in the R package
+ranger [@wright2017], in this case fitting 1000 individual trees to bootstrap
 subsamples of the data, then averaging their probability estimates to obtain:
 
 $$ 
@@ -291,34 +295,36 @@ limitation, it is common in ecology to fill in for unobserved absence locations
 by sampling a very large number of randomly chosen locations and then
 reinterpreting the classification problem as an attempt to distinguish presence
 locations from those random background - as opposed to observed absence -
-locations (CITE). This strategy has a decent statistical and ecological
-justification, but in the context of Random Forest, an additional problem arises
-from the fact that the algorithm cannot differentiate true absences from random
-background locations- all it sees are zeroes. Because the sample of background
-locations is usually orders of magnitude larger than the number of presence
-locations (in this case, approximately 100 times larger since we use 10,000
-background locations), the model's best strategy for achieving high predictive
-accuracy is to embrace unqualified pessimism: ignore the known presence
-locations and just assume that everything is a random background location. In
-machine learning, this is known as class imbalance.
+locations [@elith2006; @elith2009; @elith2011]. This strategy has a decent
+statistical and ecological justification, but in the context of Random Forest,
+an additional problem arises from the fact that the algorithm cannot
+differentiate true absences from random background locations - all it sees are
+zeroes. Because the sample of background locations is usually orders of
+magnitude larger than the number of presence locations (in this case,
+approximately 100 times larger since we use 10,000 background locations), the
+model's best strategy for achieving high predictive accuracy is to embrace
+unqualified pessimism: ignore the known presence locations and just assume that
+everything is a random background location. In machine learning, this is known
+as class imbalance.
 
 To account for class imbalance, @valavi2021 recommend a two-part down-sampling
 strategy. The down-sampling part itself is straightforward. We simply instruct
 Random Forest to use all of the presence locations and an equal number of
-background locations in each individual tree, so that if there are $N$ presence
-locations, the sample size for each tree should be $2N$ (or $N$ presence
-locations and $N$ background locations). The other part of the strategy is to
-substantially increase the default number of trees fit to the data (from 500 in
-ranger to 1000). This has the effect of repeatedly sampling with replacement
-from the background locations, so that our use of classification Random Forest,
-in effect, serves to approximate a probability density proportional to the count
-of presence locations in a localized area. This makes model predictions from the
-Random Forest analogous to what would be obtained by applying a 2D kernel
-density smooth to the presence locations, also to the raw outputs of the now
-quite popular Maximum Entropy approach to species distribution modeling in
-ecology [@merow2013, @fithian2013, @renner2015]. In fact, Valavi *et al* insist
-that the probability estimates from the classification Random Forest should be
-interpreted as likelihoods for this very reason.
+regularly sampled background locations in each individual tree, so that if there
+are $N$ presence locations, the sample size for each tree should be $2N$ (or $N$
+presence locations and $N$ background locations). The other part of the strategy
+is to substantially increase the default number of trees fit to the data (from
+500 in ranger to 1000). This has the effect of repeatedly sampling with
+replacement from the background locations, so that our use of classification
+Random Forest, in effect, serves to approximate a probability density
+proportional to the count of presence locations in a localized area. This makes
+model predictions from the Random Forest analogous to what would be obtained by
+applying a 2D kernel density smooth to the presence locations, also to the raw
+outputs of the now quite popular Maximum Entropy approach to species
+distribution modeling in ecology [@merow2013; @fithian2013; @renner2015]. In
+fact, Valavi *et al* insist that the probability estimates from the
+classification Random Forest should be interpreted as likelihoods for this very
+reason.
 
 As this is a comparative analysis, we include an interaction term in $X$ for the
 time periods, PaleoIndian and Archaic. In the context of Random Forest, this is
@@ -342,8 +348,8 @@ covariance between PaleoIndian sites themselves. That is, the model can take
 advantage of the fact that the presence of a PaleoIndian site at some location
 may, in fact, make it more likely that other PaleoIndian sites will be found in
 nearby locations. This is achieved in the current analysis using a method known
-as Fixed Rank Kriging (FRK, CITE), which allows us to decompose the error term
-in the above model into
+as Fixed Rank Kriging (FRK) [@cressie2008; @sekulic2020], which allows us to
+decompose the error term in the above model into:
 
 $$ 
 e(s) = \sum_{k=1}^{K} \phi_{k}(s)\eta_{k} + \xi(s)
@@ -351,41 +357,43 @@ $$
 
 with $\phi_{k}(s)$ being a spatial basis function evaluated over $K$ spatial
 knots, $\eta_{k}$ a spatial weight (also estimated with Random Forest), and
-$\xi(s)$ a spatial noise term. In this case, we implement $\phi_{k}(s)$ using
-the Matérn32 radial basis function. In previous experiments with spatial bases
-in Random Forest, we found that it was extremely sensitive to $\kappa$, the
+$\xi(s)$ a random noise term. In this case, we set $K=129$ for knots at two
+spatial scales (117 at the fine-grain scale and 12 at the coarse-grain scale)
+over the extent of $\mathcal{D}$ and implement $\phi_{k}(s)$ using the Matérn32
+radial basis function. In previous experiments with spatial bases in Random
+Forest, we found that Random Forest was extremely sensitive to $\kappa$, the
 maximum range of support in discontinuous functions like bi-square, which return
 zeroes at distances greater than $\kappa$, thus introducing circular artifacts
 into geographic probability estimates. Unlike bi-square, Matérn32 is smooth and
-continuous with infinite support.
+continuous with infinite support. To fit the Random Forest model with FRK, the
+values of $\phi_{k}(s)$ are appended to the covariate matrix $X(s)$ as
+additional features, hence the model estimating the weights $\eta_{k}$.
 
 ## Model evaluation
 
-For this modeling exercise, we are primarily interested in the ability of our
-model to predict the locations of the 14 PaleoIndian sites, so we ignore Archaic
-sites during model evaluation. The area under the receiver operating
-characteristic curve (often referred to as the AUC) is a common metric used for
-evaluating the predictive power of species distribution models like our Random
-Forest. For extremely small samples, however, the AUC is ill-advised. So, we
-rely instead on leave-one-out cross-validation (LOO-CV), fitting a model to 13
-of the 14 PaleoIndian sites, and then estimating the probability of presence of
-the left out PaleoIndian site, a process repeated for all 14 sites. During each
-iteration of LOO-CV, we calculate the average difference between the probability
-assigned to the left out PaleoIndian site and the probabilities assigned to all
-background points. For a single PaleoIndian site compared to $N$ background
-points, the formula is
+For this modeling exercise, we only care about a model's ability to predict
+PaleoIndian locations. This leaves us with an extremely small sample, so we
+choose to evaluate the model using leave-one-out cross-validation (LOO-CV),
+which allows us to interrogate model behavior on a per site basis. The process
+involves fitting a model to 13 of the 14 PaleoIndian sites and then estimating
+the probability of presence of the left out PaleoIndian site. We then calculate
+the average difference between the probability assigned to the left out
+PaleoIndian site $s^*$ and the probabilities assigned to all $i \in 1, ..., M$
+background points using the formula:
 
-$$\Delta P = \frac{1}{N}\sum^{N}_{i=1} P(Y=1) - P(Y_{i}=0) $$
+$$\Delta P = P(Y(s^*)=1) - \frac{1}{M}\sum^{M}_{i=1} P(Y(i)=1) $$
 
-The measure $\Delta P$ can thus range over the interval $[-1,1]$ and is roughly
-analogous to the AUC, which, in words, is the *sensitivity* of the model, its
-ability to say where sites are located ("true positives," to use the technical
-jargon), divided by the complement of its *specificity*, its ability to say
-where sites are *not* located (or "true negatives"). The AUC is meant to capture
-the idea that a model can increase in sensitivity, but typically only at the
-expense of decreasing in specificity (accurately predicting presence locations
-but also mis-classifying background locations). Taking the difference is just a
-way to approximate that ratio.
+The measure $\Delta P$ ranges over the interval $[-1,1]$ and is roughly
+analogous to the area under the receiver operating characteristic (ROC) curve, a
+common summary statistic used for evaluating the predictive power of SDMs like
+our Random Forest. In the technical jargon, the ROC is the ratio of the true
+positive to the false positive rate at a given probability threshold, but,
+intuitively, it is just the idea that increased optimism comes at a price -
+lowering the probability threshold required to predict that a site is present
+will definitely net more true positives, but it will catch more false positives,
+too. A model can minimize the potential for false positives across all
+thresholds by maximizing the separation between the probability of presence at
+known presence and background locations, hence our statistic $\Delta P$.
 
 Our model is also quite complex, however, with a fairly large parameter set,
 especially with the addition of FRK. We want to know if all that additional
@@ -396,9 +404,9 @@ incorporating FRK help, too? To answer these questions, we fit four versions of
 the model: (1) a base model with just the three travel time covariates, (2) a
 comparative model that extends the base model to include the interaction term,
 (3) a spatial model that extends the base model to include FRK, and (4) a full
-model that is both comparative and spatial. Note that the base (1) and spatial
-(3) models exclude Archaic sites in the training sets. Each of these models is
-fit during each iteration of LOO-CV. We, thus, fit 56 (4 models x 14 PaleoIndian
+model that is both comparative and spatial. We refer to these as Base,
+Comparative, Spatial, and Full models, respectively. Each of these models is fit
+during each iteration of LOO-CV. We, thus, fit 56 (4 models x 14 PaleoIndian
 sites) versions of the Random Forest model.
 
 All analyses are conducted in the R programming language and environment
@@ -406,27 +414,35 @@ All analyses are conducted in the R programming language and environment
 
 # Results
 
-Results of LOO-CV reveal no statistically significant difference in the median
-ability of different models to predict the locations of PaleoIndian sites. On
-the one hand, some sites resist estimation by any configuration of the model. As
-shown in Panel A of @fig-loocv-results, no model can reliably differentiate site
-26LA2082 from the background distribution. The models also struggle with
-26LA8329 and 26LA1029. On the other hand, all models are proficient at
-estimating the locations of 26LA4442 and 26LA4405. With the remaining sites, it
-appears that different versions of the model have variable levels of success,
-with spatial versions doing better with some sites, and a-spatial versions
-better with others. To give just two examples, the a-spatial models did equally
-well at predicting 26LA0789, at least relative to the spatial models.
-Conversely, the spatial models did equally well at predicting 26LA8332 relative
-to the a-spatial models.
+Results of LOO-CV are shown in @fig-loocv-results for each of the four models
+(Base, Comparative, Spatial, and Full) and each of the 14 PaleoIndian sites.
+Panel A shows the distribution of $\Delta P$ values across models for each
+individual PaleoIndian site. Panel B shows the distribution of $\Delta P$ values
+across sites for each individual model. These results reveal that all models are
+generally capable of distinguishing PaleoIndian presence locations from
+regularly sampled background locations, though there is no statistically
+significant difference in the median ability of different models to predict the
+locations of PaleoIndian sites. On the one hand, some sites resist estimation by
+any configuration of the model. As shown in Panel A of @fig-loocv-results, no
+model can reliably differentiate site 26LA2082 from the background distribution.
+The models also struggle with 26LA8329 and 26LA1029. On the other hand, all
+models are proficient at estimating the locations of 26LA4442 and 26LA4405. With
+the remaining sites, it appears that different versions of the model have
+variable levels of success, with spatial versions doing better with some sites,
+and a-spatial versions better with others. To give just two examples, the
+a-spatial models did equally well at predicting 26LA0789, at least relative to
+the spatial models. Conversely, the spatial models did equally well at
+predicting 26LA8332 relative to the a-spatial models.
 
 ::: {#fig-loocv-results}
 ![](/figures/loocv-results.svg){width="90%"}
 
-Results of leave-one-out cross validation. (A) Distribution of differences
-across models for each PaleoIndian site, with "26LA" removed from each
-Smithsonian Trinomial. (B) Distribution of differences across PaleoIndian sites
-for each model.
+Results of leave-one-out cross validation for each of the 4 models (Base,
+Comparative, Spatial, and Full) and each of the 14 PaleoIndian sites. (A)
+Distribution of $\Delta P$ values across models for each PaleoIndian site. (B)
+Distribution of $\Delta P$ values across PaleoIndian sites for each model. In
+the y-axis labels, "26LA" (for Lander County, Nevada) is omitted from each
+Smithsonian Trinomial
 :::
 
 In general, @fig-partials suggests that the expectation that PaleoIndian sites
@@ -479,30 +495,31 @@ of PaleoIndian sites in relation to nearby Archaic sites, the spatial basis
 encourages the model to learn PaleoIndian locations in relation to other
 PaleoIndian sites. And what we see is that the spatial models do better at
 predicting the location of a PaleoIndian site in areas of obvious spatial
-clustering, with multiple PaleoIndian sites in its proximity. That includes the
-cluster of four sites to the north, including 26LA4434, and the cluster near the
-southern end of the hypothesized Pleistocene lake shoreline, including 26LA8332.
+clustering, with multiple PaleoIndian sites in proximity to each other. That
+includes the cluster of four sites to the north, including 26LA4434, and the
+cluster near the southern end of the hypothesized Pleistocene lake shoreline,
+including 26LA8332.
 
-We note next that the comparative a-spatial model (2) performed substantially
-better when predicting 3 PaleoIndian sites that are more or less spatially
-isolated from the main PaleoIndian sites at the center of the valley, including
-26LA2082 to the far south, 26LA1029 in the far southwest, and 26LA2103 in the
-northwest. Adding to this, 26LA2082 looks utterly anomalous, which is probably
-why all of the models struggle to predict it. Conversely, the a-spatial
-comparative model does a decent job predicting 26LA1029 and 26LA2103, both of
+We note next that the Comparative model, which is a-spatial, performed
+substantially better when predicting 3 PaleoIndian sites that are more or less
+spatially isolated from the main PaleoIndian sites at the center of the valley,
+including 26LA2082 to the far south, 26LA1029 in the far southwest, and 26LA2103
+in the northwest. Adding to this, 26LA2082 looks utterly anomalous, which is
+probably why all of the models struggle to predict it. Conversely, the
+Comparative model does a decent job predicting 26LA1029 and 26LA2103, both of
 which are surrounded by Archaic sites but isolated from other PaleoIndian sites.
 
-Given all of this, should it not be the case that the full model outperforms the
+Given all of this, should it not be the case that the Full model outperforms the
 others in every case? To answer this, we need to elaborate on some limitations
 of the current implementation. It is common in geostatistics to fit two separate
 models, the first to evaluate the mean trend and the second to evaluate the
-spatial process over the first model's residuals (CITE). To get spatially
-corrected estimates, predictions from the two models are then summed together.
-This is fine as long as (a) the outcome is unbounded and continuous like a
-normally distributed variable, a common assumption in geostatistics, and (b) all
-effects are additive. If the outcome is not unbounded and continuous, summing in
-this way risks violating the bounds constraint, for example, by pushing
-probability estimates outside the unit interval $[0,1]$.
+spatial process over the first model's residuals [@cressie1993]. To get
+spatially corrected estimates, predictions from the two models are then summed
+together. This is fine as long as (a) the outcome is unbounded and continuous
+like a normally distributed variable, a common assumption in geostatistics, and
+(b) all effects are additive. If the outcome is not unbounded and continuous,
+summing in this way risks violating the bounds constraint, for example, by
+pushing probability estimates outside the unit interval $[0,1]$.
 
 The obvious solution to this is to use a model that constrains the response to
 probabilities and then incorporate the spatial component directly, like we have
@@ -519,24 +536,26 @@ What this means, in effect, is that the full model, while it is sensitive to
 interaction with Archaic sites, ends up focusing on high density PaleoIndian
 areas, and largely ignoring the outliers. This can be seen in the prediction
 maps in @fig-predictions, particularly by noting the subtle differences between
-the spatial and full model predictions.
+the Spatial and Full model predictions.
 
 To handle this trade-off, one can either choose to avoid it entirely by simply
-adopting a different modeling technique, like joint species distribution models
-(CITE), or one can choose to put more thought into the larger modeling
-objective. If the goal is simply to predict the locations of PaleoIndian sites,
-then embrace the full model. With all its limitations, it will still do a pretty
-good job of predicting PaleoIndian site locations, and with Random Forest, it
-will do so with minimal work. If the goal is to evaluate hypotheses about the
-functional response of a population to ecological variation, then the simpler
-comparative model will be more appropriate.
+adopting a different modeling technique, like Joint Species Distribution Models
+[@ovaskainen2016; @pollock2014; @wilkinson2021], or one can choose to put more
+thought into the larger modeling objective. If the goal is simply to predict the
+locations of PaleoIndian sites, then embrace the Full model. With all its
+limitations, it will still do a pretty good job of predicting PaleoIndian site
+locations, and with Random Forest, it will do so with minimal work. If the goal
+is to evaluate hypotheses about the functional response of a population to
+ecological variation, then the simpler Comparative model will be more
+appropriate.
 
 ## Implications for PaleoIndian research
 
 These findings and, in particular, the comparative, spatial methods used to
 arrive at them have important implications for the initial settlement of North
 America, especially for debates surrounding when and by what routes people
-settled the interior [@beck1997; @grayson2011; @smith2020]. In the Great Basin,
+colonized the interior [@beck1997; @grayson2011; @smith2020] and subsequent
+settlement patterning over time [@baka2025; @bradley2022]. In the Great Basin,
 this debate centers on the chronological relationship between distinct lithic
 technologies, specifically Western Stemmed Tradition (WST) and Great Basin
 Fluted (GBF) points [@grayson2011; @jazwa2021; @beck2010].
@@ -592,7 +611,20 @@ This could likely be achieved with existing data, too, particularly with the
 databases established by @thomas2013 and cultural resource companies like Far
 Western. In fact, those datasets would seemingly allow us to dispense with
 categories altogether, a somewhat tedious though often times useful simplifying
-assumption, and instead look at morphological variation through time and space.
-In so far as that variation reflects functional differences that entail
-differences in subsistence and mobility, we could use the method outlined here
-to go a step further and explain changes in those behaviors over time.
+assumption, and instead look at morphological variation through time and space
+[@stevens2026]. In so far as that variation reflects functional differences that
+entail differences in subsistence and mobility, we could use the method outlined
+here to go a step further and explain changes in those behaviors over time.
+
+# Conclusion
+
+Understanding PaleoIndian settlement dynamics is challenging given the small and
+biased sample of sites available. Here we propose and demonstrate an approach
+that helps elucidate past settlement and land use decisions within a
+theoretically-informed machine learning framework. This advances both predictive
+modeling in archaeology [@kohler1986; @kvamme2005; @vaughn2009; @yaworsky2020;
+@vernon2022] and our ability to evaluate hypotheses of PaleoIndian settlement
+and subsistence [@elston2014] during a period of environmental change with no
+ethnographic analog [@zeanah2026]. Future work can expand this application
+across greater spatial extents to identify variation in the drivers of
+PaleoIndian lifeways across North America.

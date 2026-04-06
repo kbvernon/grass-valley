@@ -2,3 +2,4 @@
 /_misc/
 /data/
 *.docx
+**/*.quarto_ipynb

@@ -38,9 +38,9 @@
   show figure: it => place(
     top,
     float: true,
-    clearance: 1.5em,
+    clearance: 2.5em,
     block(
-      spacing: 1.5em,
+      spacing: 2.5em,
       it
     )
   )
