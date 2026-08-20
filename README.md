@@ -1,14 +1,18 @@
 # grass-valley
 
 <!-- badges: start -->
+
 [![DOI](https://zenodo.org/badge/492549877.svg)](https://doi.org/10.5281/zenodo.19445861)
-[![License: CC BY 4.0](https://img.shields.io/badge/License-CC_BY_4.0-lightgrey.svg)](https://creativecommons.org/licenses/by/4.0/)
-[![Static Badge](https://img.shields.io/badge/Quarto-Paper-74AADB?style=social&logo=Quarto)](https://quarto.org)
+[![License: CC BY
+4.0](https://img.shields.io/badge/License-CC_BY_4.0-lightgrey.svg)](https://creativecommons.org/licenses/by/4.0/)
+[![Static
+Badge](https://img.shields.io/badge/Quarto-Paper-74AADB?style=social&logo=Quarto)](https://quarto.org)
+
 <!-- badges: end -->
 
 This repository contains data and code for the paper:
 
-> Kenneth B. Vernon 
+> Kenneth B. Vernon
 > [![](https://orcid.org/sites/default/files/images/orcid_16x16.png)](https://orcid.org/0000-0003-0098-5092),
 > Kate E. Margargal
 > [![](https://orcid.org/sites/default/files/images/orcid_16x16.png)](https://orcid.org/0000-0002-7444-7847),
@@ -24,8 +28,8 @@ This repository contains data and code for the paper:
 > [![](https://orcid.org/sites/default/files/images/orcid_16x16.png)](https://orcid.org/0000-0002-6810-1911),
 > and Brian F. Codding
 > [![](https://orcid.org/sites/default/files/images/orcid_16x16.png)](https://orcid.org/0000-0001-7977-8568)
-> (). Explaining PaleoIndian settlement in the Intermountain West with comparative machine learning.
-> *Journal of Archaeological Science*.
+> . Explaining PaleoIndian settlement in the Intermountain West with comparative
+> machine learning.
 
 **Preprint**: [manuscript.pdf](/manuscript/manuscript.pdf)\
 **Supplement**:
@@ -54,8 +58,8 @@ Preservation Office in Nevada.
 
 ## 📈 Replicate analysis
 
-Assuming you had access to the data in `grass-valley.gpkg`, you could
-re-run all of the data preparation and analysis like this:
+Assuming you had access to the data in `grass-valley.gpkg`, you could re-run all
+of the data preparation and analysis like this:
 
 ``` r
 # install R dependencies

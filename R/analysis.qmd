@@ -48,26 +48,28 @@ interaction term for time period (`Archaic` and `PaleoIndian`) that approximates
 a hierarchical model.
 
 The second method is geostatistical, an attempt to squeeze additional
-information out of the spatial co-occurrence of the time periods. For sites
-$s \in \mathbb{R}^{2}$, we fit a species distribution model using Fixed Rank
-Kriging, formally
-
-$$ 
-Y(s) = \mu(X(s)) + \omega(s) + \xi(s)
-$$
-
-with $\mu(X(s))$ being the mean trend or deterministic response to spatially-
-referenced covariates $X$, $\omega(s)$ being the spatial process, and $\xi(s)$
-being a spatial noise term. Following Valavi *et al* (2021), we estimate the
-mean trend using down-sampled random forest, and the spatial process is
-approximated using a spatial basis function with $K$ spatial knots
+information out of the spatial co-occurrence of the time periods. For locations
+$s \in \mathcal{D} \subset \mathbb{R}^{2}$, we model the probability that a site
+is present given spatially-referenced covariates $X$ observed at $s$
 
 $$
-\omega(s) \equiv \sum_{k=1}^{K} \phi_{k}(s)\eta_{k}
+P(Y(s)=1 \,|\, X(s)) = f(X(s))
 $$
 
-with $\phi_{k}(s)$ being the spatial basis function and $\eta_{k}$ a spatial
-weight derived from the data, which we estimate using the same random forest.
+estimating $f$ with a down-sampled classification random forest, following
+Valavi *et al* (2021). To let the model leverage spatial covariance among sites,
+we then condition the outcome on a spatial basis function $\phi(s)$ evaluated
+around $K$ spatial knots
+
+$$
+P(Y(s)=1 \,|\, X(s), \phi(s)) = f(X(s), \phi(s))
+$$
+
+which we fit by appending the values of $\phi(s)$ to the covariate matrix $X(s)$
+as additional features. The Gaussian version of this method, which learns a
+linear combination of the spatial bases, is known as Fixed Rank Kriging (FRK).
+Random forest instead learns an arbitrary function of them, including their
+interaction with the other covariates.
 
 ## R Preamble
 
@@ -218,11 +220,6 @@ Independent variables:
     capture potential sampling bias
 
 Each cost-distance variable is measured in hours.
-
-**Note:** A limitation of the current approach is that we have to make $K$
-copies of the background data for the $K$ species being modeled. In this case,
-$K=2$, hence repeating `UNION ALL` for Archaic and PaleoIndian quadrature
-points.
 
 ```{r}
 #| label: data
@@ -515,12 +512,16 @@ background sites.
 
 To account for spatial interaction, we use the Matérn32 radial basis function
 
-$$ 
-\phi_{k}(s) = (1 + \sqrt{3}d_{sk}/\kappa) exp(-\sqrt{3}d_{sk}/\kappa)
+$$
+\phi_{k}(s) = \left(1 + \sqrt{3}d_{sk}/\kappa\right)\exp\left(-\sqrt{3}d_{sk}/\kappa\right)
 $$
 
-evaluated at spatial knots $k$, with $\kappa$ being the range of support for
-each function.
+with $d_{sk}$ being the distance from location $s$ to knot $k$ and $\kappa$ the
+range of support. We evaluate this function at two spatial resolutions, giving
+$K$ knots in total. Matérn32 is smooth and continuous with infinite support,
+unlike discontinuous alternatives such as bi-square, which return zeroes beyond
+$\kappa$ and, in our experiments, made random forest extremely sensitive to
+$\kappa$ while introducing circular artifacts into geographic estimates.
 
 ```{r}
 #| label: spatial-basis-fns
@@ -548,18 +549,19 @@ spatial_bases <- as.matrix(spatial_bases[, j])
 remove(R, j)
 ```
 
-This might look complicated, but the procedure for evaluating $\phi$ over $K$ is
-surprisingly simple. First, let us note that $X(s)$ is, in effect, our design
-matrix with dimensions $n$ x $m$, for $n$ observations and $m$ covariates. The
-spatial basis function $\phi_{k}(s)$, when evaluated over the $K$ knots,
-produces an $n$ x $K$ matrix. The advantage of this approach is that a full
-covariance matrix across all sites would be $n$ x $n$, but with the spatial
-basis, we can approximate that covariance structure with a $n$ x $K$ matrix
-where $K << n$. Equally important, the resulting matrix can simply be
-concatenated with the design matrix $X(s)$ - `cbind()` in R-speak - thus,
-effectively treating the evaluated spatial basis as $K$ additional covariates.
-This means no additional optimization is required to fit the model. The default
-algorithm is sufficient.
+The procedure for evaluating $\phi$ over $K$ is simpler than it might look.
+First, let us note that $X(s)$ is, in effect, our design matrix with dimensions
+$n$ x $m$, for $n$ observations and $m$ covariates. The spatial basis function
+$\phi_{k}(s)$, when evaluated over the $K$ knots, produces an $n$ x $K$ matrix.
+The advantage of this approach is that a full covariance matrix across all sites
+would be $n$ x $n$, but with the spatial basis, we can approximate that
+covariance structure with an $n$ x $K$ matrix where $K << n$. Note that we
+discard any basis column that is zero at every observation, as it carries no
+information for the model to split on, so $K$ counts only the retained columns.
+Equally important, the resulting matrix can simply be concatenated with the
+design matrix $X(s)$, treating the evaluated spatial basis as $K$ additional
+covariates. This means no additional optimization is required to fit the model.
+The default algorithm is sufficient.
 
 ```{r, results='hide'}
 #| label: spatial-bases
@@ -616,18 +618,6 @@ training_data <- sites |>
   bind_cols(spatial_bases)
 
 remove(spatial_bases)
-```
-
-### Colinearity check
-
-And a quick test to make sure they are not correlated.
-
-```{r}
-#| label: collinearity
-training_data |>
-  select(lake, roads, streams) |>
-  cor() |>
-  round(3)
 ```
 
 ## Analysis
@@ -754,30 +744,32 @@ moran_test(
 
 ### Leave-one-out Cross Validation (LOOCV)
 
-The AUC is a common metric used for evaluating the predictive power of SDMs. For
-extremely small samples, however, the AUC is ill-advised, especially for LOO-CV
-test sets, so we calculate instead the average difference between the
-probabilities assigned to the PaleoIndian sites and the background points in the
-test set. For a single PaleoIndian site compared to $N$ background points, the
-formula is
+The AUC is a common metric used for evaluating the predictive power of SDMs, but
+it summarizes a model over an entire test set, which tells us nothing about
+individual sites. Because we want to interrogate model behavior on a per site
+basis, we calculate instead the percentile rank of each left out PaleoIndian site
+$s^*$ relative to all $i = 1, ..., M$ background points
 
-$$\Delta P = \frac{1}{N}\sum^{N}_{i=1} P(Y=1) - P(Y_{i}=0) $$
+$$
+R = \frac{1}{M}\sum^{M}_{i=1} \mathbf{1}[\hat{p}(i) < \hat{p}(s^*)]
+$$
 
-The size of $P(Y=1)$ in this case is analogous to the sensitivity of the model,
-it's ability to say where sites are located ("true positives" to use the
-technical jargon), and $P(Y=1) - P(Y=0)$ is analogous to the specificity of the
-model, it's ability to say where sites are *not* located (or "true negatives").
-Estimating this for each PaleoIndian sites requires looping through the data,
+with $\mathbf{1}[\cdot]$ being the indicator function, which is one when
+$\hat{p}(i) < \hat{p}(s^*)$ and zero otherwise, and $\hat{p}$ being the estimate
+returned by the model. This measure ranges over the unit interval $[0,1]$ and
+reads as the proportion of the landscape that the focal site outscores, so
+$R=0.5$ means the model cannot distinguish the site from a randomly chosen
+location and $R=1$ means it ranks the site above every background point.
+
+Estimating this for each PaleoIndian site requires looping through the data,
 training a model on all PaleoIndian sites except a focal site (the leave-one-out
-site), then predicting the probability of occurrence on the focal site ($P(Y =
-1)$) and all background sites ($P(Y_{i}=0)$). To simplify the for-loop, we
-define a helper function for fitting a model to training data and evaluating it
-against test data.
+site), then estimating $\hat{p}$ for the focal site and for all background sites.
+To simplify the for-loop, we define a helper function for fitting a model to
+training data and evaluating it against test data.
 
 ::: callout-note
-Because we are modeling presence-only data, the expressions `P(Y=1)` and 
-`P(Y=0)` are more accurately interpreted as *relative likelihoods* rather than
-strict probabilities.
+Because we are modeling presence-only data, $\hat{p}$ is more accurately
+interpreted as a *relative likelihood* rather than a strict probability.
 :::
 
 ```{r}
@@ -803,17 +795,16 @@ estimate <- function(.model, .data) {
     num.threads = N_THREADS,
     verbose = FALSE
   )
-
-  yhat[["predictions"]][, "1"]
+  yhat <- yhat[["predictions"]][, "1"]
+  list(presence = yhat[1], absence = yhat[-1])
 }
 
-evaluate <- function(.formula, .train, .test) {
-  rf <- fit(.formula, .train)
-  y_hat <- estimate(rf, .test)
-
+evaluate <- function(.estimate) {
+  presence <- .estimate[["presence"]]
+  absence <- .estimate[["absence"]]
   data.frame(
-    presence = y_hat[1],
-    absence = I(list(y_hat[-1]))
+    rank = mean(absence < presence),
+    difference = mean(presence - absence)
   )
 }
 ```
@@ -849,9 +840,9 @@ And evaluate them
 ```{r}
 #| label: loocv
 ids <- with(training_data, id[pa == 1 & period == "PaleoIndian"])
-
-model_evals <- vector(mode = "list", length = length(ids))
-names(model_evals) <- ids
+evaluations <- vector(mode = "list", length = length(ids))
+names(evaluations) <- ids
+estimates <- evaluations
 
 for (id in ids) {
   test <- bind_rows(
@@ -863,23 +854,29 @@ for (id in ids) {
 
   i <- with(train, which(period == "PaleoIndian"))
 
-  all_tests <- rbind(
-    evaluate(formulas[["Base"]], train[i, ], test),
-    evaluate(formulas[["Spatial"]], train[i, ], test),
-    evaluate(formulas[["Comparative"]], train, test),
-    evaluate(formulas[["Full"]], train, test)
+  models <- list(
+    fit(formulas[["Base"]], train[i, ]),
+    fit(formulas[["Spatial"]], train[i, ]),
+    fit(formulas[["Comparative"]], train),
+    fit(formulas[["Full"]], train)
   )
 
-  all_tests[["model"]] <- names(formulas)
-  all_tests[["id"]] <- id
+  estimates_ <- lapply(models, estimate, .data = test)
+  names(estimates_) <- names(formulas)
 
-  model_evals[[id]] <- all_tests[c("id", "model", "presence", "absence")]
+  evals_ <- lapply(estimates_, evaluate)
+  evals_ <- do.call(rbind, evals_)
+  evals_[["model"]] <- names(formulas)
+  evals_[["id"]] <- id
+
+  estimates[[id]] <- estimates_
+  evaluations[[id]] <- evals_[c("id", "model", "rank", "difference")]
 }
 
-model_evals <- do.call(rbind, model_evals)
-rownames(model_evals) <- NULL
+evaluations <- do.call(rbind, evaluations)
+rownames(evaluations) <- NULL
 
-remove(id, ids, train, test, all_tests)
+remove(i, id, ids, train, test, models, evals_)
 ```
 
 ## Results
@@ -887,7 +884,7 @@ remove(id, ids, train, test, all_tests)
 To help interpret the results of the analysis, we provide all of the following:
 
 1.  LOOCV distributions across sites and models
-2.  Partial Dependence Profiles (PDP)
+2.  Accumulated Local Effects (ALEs)
 3.  Spatial predictions
 
 These are evaluated for each of the four models detailed above.
@@ -900,21 +897,16 @@ locations as described above.
 ```{r}
 #| label: figure-loocv
 #| code-fold: true
-dp <- model_evals |>
-  unnest(absence) |>
+dp <- evaluations |>
   mutate(
-    dp = presence - absence,
-    id = gsub("26LA", "", id),
+    id = sub("26LA", "", id),
+    id = fct_reorder(factor(id), rank, max),
     model = fct_relevel(factor(model), "Full", "Comparative", "Spatial")
-  ) |>
-  group_by(id, model) |>
-  summarize(dp = mean(dp), n = length(absence)) |>
-  ungroup() |>
-  mutate(id = fct_reorder(factor(id), dp, max))
+  )
 
 segments <- dp |>
   group_by(id) |>
-  summarize(x = min(dp), xend = max(dp)) |>
+  summarize(x = min(rank), xend = max(rank)) |>
   ungroup()
 
 plt1 <- ggplot() +
@@ -926,30 +918,30 @@ plt1 <- ggplot() +
   ) +
   geom_point(
     data = dp,
-    aes(dp, id, color = model),
+    aes(rank, id, color = model),
     size = 2
   ) +
   scale_color_manual(
     values = gvcols("light-drab", "pink", "orange", "yellow"),
     guide = "none"
   ) +
-  labs(x = "P(Y=1) - P(Y=0)", title = "A. Site Distributions") +
+  labs(x = "Percentile Rank [R]", title = "A. Site Distributions") +
   theme(axis.title.y = element_blank())
 
 labels <- dp |>
   group_by(model) |>
-  summarize(x = quantile(dp, probs = 0.75)) |>
+  summarize(x = quantile(rank, probs = 0.25)) |>
   ungroup()
 
 plt2 <- ggplot() +
   geom_boxplot(
     data = dp,
-    aes(dp, model, fill = model),
+    aes(rank, model, fill = model),
     linewidth = 0.3
   ) +
   geom_point(
     data = dp,
-    aes(dp, model),
+    aes(rank, model),
     size = 2,
     shape = 21,
     color = "black",
@@ -959,9 +951,9 @@ plt2 <- ggplot() +
   geom_text(
     data = labels,
     aes(x, model, label = model, color = model),
-    nudge_x = 0.01,
+    nudge_x = -0.02,
     nudge_y = 0.2,
-    hjust = 0,
+    hjust = 1,
     vjust = 0,
     size = 12 / .pt
   ) +
@@ -971,7 +963,7 @@ plt2 <- ggplot() +
   scale_color_manual(
     values = gvcols("drab", "dark-pink", "dark-orange", "dark-yellow")
   ) +
-  labs(x = "P(Y=1) - P(Y=0)", title = "B. Model Distributions") +
+  labs(x = "Percentile Rank [R]", title = "B. Model Distributions") +
   theme(
     axis.text.y = element_blank(),
     axis.ticks.y = element_blank(),
@@ -994,9 +986,9 @@ remove(dp, segments, labels, plt, plt1, plt2)
 ::: {#fig-loocv-results style="width: 90%; margin: 0 auto;"}
 ![](/figures/loocv-results.svg){width="100%"}
 
-Results of leave-one-out cross validation. (A) Distribution of differences
-across models for each PaleoIndian site. (B) Distribution of differences across
-PaleoIndian sites for each model.
+Results of leave-one-out cross validation. (A) Distribution of percentile ranks
+across models for each PaleoIndian site. (B) Distribution of precentile ranks 
+across PaleoIndian sites for each model.
 :::
 
 **Spatial sorting bias.** Note that the above LOO-CV currently ignores potential
@@ -1025,27 +1017,28 @@ colnames(D) <- with(sites, id[pa == 0 & period == "PaleoIndian"])
 
 r <- seq(5, 65, by = 10)
 
-for (i in seq_len(nrow(model_evals))) {
-  id <- model_evals[["id"]][i]
-  dp <- c()
+for (i in seq_len(nrow(evaluations))) {
+  id <- evaluations[["id"]][i]
+  mod_ <- evaluations[["model"]][i]
+  prank <- c()
 
   for (threshold in r) {
     j <- which(c(D[id, ]) <= threshold)
     j <- unname(j)
 
-    p_1 <- model_evals[i, "presence", drop = TRUE]
-    p_0 <- model_evals[i, "absence", drop = TRUE][[1]][j]
+    p_1 <- estimates[[id]][[mod_]][["presence"]]
+    p_0 <- estimates[[id]][[mod_]][["absence"]][j]
 
-    dp <- c(dp, mean(p_1 - p_0))
+    prank <- c(prank, mean(p_0 < p_1))
   }
 
-  model_evals[["range"]][i] <- list(dp)
+  evaluations[["range"]][i] <- list(prank)
 }
 
-M <- as.data.frame(do.call(rbind, model_evals[["range"]]))
+M <- as.data.frame(do.call(rbind, evaluations[["range"]]))
 colnames(M) <- r
 
-M <- cbind(model_evals[c("id", "model")], M)
+M <- cbind(evaluations[c("id", "model")], M)
 
 M <- M |>
   pivot_longer(c(-id, -model), names_to = "distance", values_to = "value") |>
@@ -1063,7 +1056,7 @@ plt <- ggplot(M, aes(distance, value, group = model, color = model)) +
     guide = guide_colorlegend(reverse = TRUE)
   ) +
   facet_wrap(vars(id)) +
-  labs(x = "Distance [km]", y = "P(Y=1) - P(Y=0)") +
+  labs(x = "Distance [km]", y = "Percentile Rank [R]") +
   scale_x_continuous(breaks = seq(5, 65, by = 20)) +
   theme(
     legend.position = "top",
@@ -1078,7 +1071,7 @@ ggsave(
   height = 7
 )
 
-remove(i, j, id, ids, dp, r, p_1, p_0, D, M, plt)
+remove(i, j, id, ids, r, p_1, p_0, D, M, plt)
 ```
 
 ::: {#fig-loocv-distance style="width: 80%; margin: 0 auto;"}
@@ -1088,80 +1081,85 @@ Results of leave-one-out cross validation compared to background points at
 different distances from each left out PaleoIndian site.
 :::
 
-### Partial Dependence Profile (PDP)
+### Accumulated Local Effects (ALEs)
 
 ```{r}
-#| label: partials
-pdp <- function(variable, model, data) {
-  # observations of focal variable
-  X <- data[[variable]]
-  X <- data.frame(x = seq(min(X), max(X), length = N_GRID))
-  names(X) <- variable
+#| label: ales
+ale <- function(variable, .model, .data) {
+  x <- .data[[variable]]
 
-  # expand grid
-  data[[variable]] <- NULL
-  new_data <- X |>
-    merge(data, all = TRUE) |>
-    subset(period == "PaleoIndian")
-
-  # estimate across expanded grid and average across each value of X
-  new_data[["yhat"]] <- estimate(model, new_data)
-  new_data <- new_data[c(variable, "yhat")]
-  names(new_data) <- c("x", "yhat")
-  new_data <- aggregate(
-    yhat ~ x,
-    data = new_data,
-    FUN = mean,
-    simplify = TRUE
+  # bin the focal variable at its own quantiles
+  breaks <- quantile(
+    x,
+    probs = seq(0, 1, length = N_GRID + 1),
+    names = FALSE
   )
+  breaks <- unique(breaks)
+  bin <- .bincode(x, breaks, include.lowest = TRUE)
 
-  # return
-  new_data[["variable"]] <- variable
-  new_data[c("variable", "x", "yhat")]
+  # predict at each observation's bin edges, holding all else fixed
+  lower <- .data
+  upper <- .data
+  lower[[variable]] <- breaks[bin]
+  upper[[variable]] <- breaks[bin + 1]
+  lower <- unlist(estimate(.model, lower), use.names = FALSE)
+  upper <- unlist(estimate(.model, upper), use.names = FALSE)
+  delta <- upper - lower
+
+  # accumulate mean within-bin differences across bins
+  bins <- factor(bin, levels = seq_along(breaks[-1]))
+  mean_delta <- tapply(delta, bins, mean)
+  mean_delta[is.na(mean_delta)] <- 0
+  yhat <- cumsum(c(0, mean_delta))
+
+  # center so the data-weighted average effect is zero
+  yhat <- yhat - mean(yhat[bin + 1])
+
+  data.frame(variable = variable, x = breaks, yhat = yhat)
 }
 
 i <- which(training_data[["period"]] == "PaleoIndian")
 
-models <- Map(
-  fit,
-  .formula = formulas,
-  .train = list(
-    training_data[i, ],
-    training_data[i, ],
-    training_data,
-    training_data
-  ),
-  USE.NAMES = TRUE
+models <- list(
+  Base = fit(formulas[["Base"]], training_data[i, ]),
+  Comparative = fit(formulas[["Comparative"]], training_data),
+  Spatial = fit(formulas[["Spatial"]], training_data[i, ]),
+  Full = fit(formulas[["Full"]], training_data)
 )
 
-partial_dependence <- Map(
-  pdp,
-  variable = rep(c("lake", "streams", "roads"), each = length(models)),
-  model = models,
-  MoreArgs = list(data = training_data),
+variables <- c("lake", "streams", "roads")
+
+ales <- Map(
+  ale,
+  variable = rep(variables, each = 2),
+  .model = models[c("Base", "Comparative")],
+  MoreArgs = list(.data = training_data[i, ]),
   USE.NAMES = FALSE
 )
 
-partial_dependence <- do.call(rbind, partial_dependence)
+model_labels <- rep(
+  rep(c("Base", "Comparative"), times = 3),
+  times = sapply(ales, nrow)
+)
 
-partial_dependence[["model"]] <- rep(names(models), each = N_GRID)
+ales <- do.call(rbind, ales)
+
+ales[["model"]] <- model_labels
 ```
 
 ```{r}
-#| label: figure-partials
+#| label: figure-ales
 #| code-fold: true
-partial_dependence[["model"]] <- fct_relevel(
-  partial_dependence[["model"]],
-  "Full",
-  "Comparative",
-  "Spatial"
+ales[["model"]] <- fct_relevel(
+  ales[["model"]],
+  "Comparative"
 )
 
-plt <- ggplot(partial_dependence, aes(x, yhat, color = model)) +
+plt <- ggplot(ales, aes(x, yhat, color = model)) +
   geom_line(linewidth = 0.8) +
   scale_color_manual(
     name = "Model",
-    values = gvcols("light-drab", "pink", "orange", "yellow"),
+    values = gvcols("pink", "yellow"),
     guide = guide_colorlegend(reverse = TRUE)
   ) +
   facet_wrap(
@@ -1172,8 +1170,7 @@ plt <- ggplot(partial_dependence, aes(x, yhat, color = model)) +
       paste("To", str_to_title(.x))
     })
   ) +
-  labs(x = "Hours", y = "P(Y=1)") +
-  scale_y_continuous(breaks = c(0, 0.5, 1), limits = c(0, 1)) +
+  labs(x = "Hours", y = "Accumulated Local Effect") +
   theme(
     legend.position = "bottom",
     legend.margin = margin(),
@@ -1182,7 +1179,7 @@ plt <- ggplot(partial_dependence, aes(x, yhat, color = model)) +
 
 ggsave(
   plot = plt,
-  filename = "figures/partials.svg",
+  filename = "figures/ales.svg",
   width = 6.3,
   height = 2.9
 )
@@ -1190,11 +1187,11 @@ ggsave(
 remove(plt)
 ```
 
-::: {#fig-partials style="width: 90%; margin: 0 auto;"}
-![](/figures/partials.svg){width="100%"}
+::: {#fig-ales style="width: 90%; margin: 0 auto;"}
+![](/figures/ales.svg){width="100%"}
 
-Partial dependence plots. Response is technically the relative likelihood of
-occurrence of a PaleoIndian site, not a strict probability.
+Accumulated local effects. Response is technically the centered relative 
+likelihood of occurrence of a PaleoIndian site, not a strict probability.
 :::
 
 ### Predictions
@@ -1240,6 +1237,17 @@ Now we feed these covariate rasters into our prediction function.
 
 ```{r}
 #| label: predictions
+estimate <- function(.model, .data) {
+  yhat <- predict(
+    .model,
+    data = .data,
+    type = "response",
+    num.threads = N_THREADS,
+    verbose = FALSE
+  )
+  yhat[["predictions"]][, "1"]
+}
+
 r_predictions <- lapply(
   models,
   \(rf) {
