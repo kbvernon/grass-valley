@@ -54,6 +54,7 @@ keywords:
   - Clovis
 target_journal: ""
 correspondence: k.vernon@sci.utah.edu
+linenumbers: true
 bibliography: bibliography.bib
 bibliographystyle: apa
 format:

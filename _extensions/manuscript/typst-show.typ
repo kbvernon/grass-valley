@@ -22,5 +22,8 @@ $endif$
 $if(fontsize)$
   fontsize: $fontsize$,
 $endif$
+$if(linenumbers)$
+  linenumbers: true,
+$endif$
   doc,
 )

@@ -9,6 +9,7 @@
   correspondence: [],
   font: "libertinus serif",
   fontsize: 12pt,
+  linenumbers: false,
   doc,
 ) = {
   set page(
@@ -119,6 +120,9 @@
 
   // main
   set par(leading: 1.1em, spacing: 2em)
+  set par.line(
+    numbering: if linenumbers { n => text(size: 0.7em, fill: luma(120))[#n] }
+  )
 
   // tables opt out of the document's loose leading/spacing
   set table(
